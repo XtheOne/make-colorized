@@ -55,4 +55,6 @@ void outputs (int is_err, const char *msg);
 #else
 /* Dump any child output content to stdout, and reset it.  */
 void output_dump (struct output *out);
+int replace_string(char*, int*, char*, char*);
+
 #endif

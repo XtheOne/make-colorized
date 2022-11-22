@@ -574,8 +574,9 @@ int one_shell;
 /* One of OUTPUT_SYNC_* if the "--output-sync" option was given.  This
    attempts to synchronize the output of parallel jobs such that the results
    of each job stay together.  */
+/* default to line sync for coloring */
 
-int output_sync = OUTPUT_SYNC_NONE;
+int output_sync = OUTPUT_SYNC_LINE;
 
 /* Nonzero if we have seen the '.NOTPARALLEL' target.
    This turns off parallel builds for this invocation of make.  */
@@ -1828,14 +1829,14 @@ main (int argc, char **argv, char **envp)
             goto job_setup_complete;
 
           /* Oops: we have jobserver-auth but it's invalid :(.  */
-          O (error, NILF, _("warning: jobserver unavailable: using -j1.  Add '+' to parent make rule."));
+          O (warning, NILF, _("warning: jobserver unavailable: using -j1.  Add '+' to parent make rule."));
           arg_job_slots = 1;
         }
 
       /* The user provided a -j setting on the command line so use it: we're
          the master make of a new jobserver group.  */
       else if (!restarts)
-        ON (error, NILF,
+        ON (warning, NILF,
             _("warning: -j%d forced in submake: resetting jobserver mode."),
             argv_slots);
 
@@ -2092,7 +2093,7 @@ main (int argc, char **argv, char **envp)
         /* Makefile MAKEFLAGS set -j, but we already have a jobserver.
            Make us the master of a new jobserver group.  */
         if (!restarts)
-          ON (error, NILF,
+          ON (warning, NILF,
               _("warning: -j%d forced in makefile: resetting jobserver mode."),
               arg_job_slots);
 
@@ -2188,9 +2189,9 @@ main (int argc, char **argv, char **envp)
 # endif
       )
     {
-      O (error, NILF,
+      O (warning, NILF,
          _("Parallel jobs (-j) are not supported on this platform."));
-      O (error, NILF, _("Resetting to single job (-j1) mode."));
+      O (warning, NILF, _("Resetting to single job (-j1) mode."));
       arg_job_slots = INVALID_JOB_SLOTS;
       job_slots = 1;
     }
@@ -2219,14 +2220,15 @@ main (int argc, char **argv, char **envp)
   /* If we're not using parallel jobs, then we don't need output sync.
      This is so people can enable output sync in GNUMAKEFLAGS or similar, but
      not have it take effect unless parallel builds are enabled.  */
-  if (syncing && job_slots == 1)
-    {
-      OUTPUT_UNSET ();
-      output_close (&make_sync);
-      syncing = 0;
-      output_sync = OUTPUT_SYNC_NONE;
-    }
-
+  /* Disabled for coloring */
+//  if (syncing && job_slots == 1)
+//    {
+//      OUTPUT_UNSET ();
+//      output_close (&make_sync);
+//      syncing = 0;
+//      output_sync = OUTPUT_SYNC_NONE;
+//    }
+ 
   if (syncing)
     {
       /* If there is no mutex we're the base: create one.  Else parse it.  */
@@ -2253,7 +2255,7 @@ main (int argc, char **argv, char **envp)
 #ifndef MAKE_SYMLINKS
   if (check_symlink_flag)
     {
-      O (error, NILF, _("Symbolic links not supported: disabling -L."));
+      O (warning, NILF, _("Symbolic links not supported: disabling -L."));
       check_symlink_flag = 0;
     }
 #endif
@@ -2441,7 +2443,7 @@ main (int argc, char **argv, char **envp)
           struct goaldep *d = skipped_makefiles;
           const char *err = strerror (d->error);
 
-          OSS (error, &d->floc, _("%s: %s"), dep_name (d), err);
+          OSS (warning, &d->floc, _("%s: %s"), dep_name (d), err);
 
           skipped_makefiles = skipped_makefiles->next;
           free_goaldep (d);
@@ -2545,7 +2547,7 @@ main (int argc, char **argv, char **envp)
                     if (d->flags & RM_INCLUDED)
                       /* An included makefile.  We don't need to die, but we
                          do want to complain.  */
-                      OS (error, &d->floc,
+                      OS (warning, &d->floc,
                           _("Included makefile '%s' was not found."), dnm);
                     else
                       {
@@ -2919,7 +2921,7 @@ main (int argc, char **argv, char **envp)
 
     /* If we detected some clock skew, generate one last warning */
     if (clock_skew_detected)
-      O (error, NILF,
+      O (warning, NILF,
          _("warning:  Clock skew detected.  Your build may be incomplete."));
 
     /* Exit.  */

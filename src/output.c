@@ -149,7 +149,10 @@ log_working_directory (int entering)
 static void
 pump_from_tmp (int from, FILE *to)
 {
-  static char buffer[8192];
+  int len;
+  int len_add;
+  long pos;
+  char* buffer;
 
 #ifdef WINDOWS32
   int prev_mode;
@@ -159,24 +162,46 @@ pump_from_tmp (int from, FILE *to)
   prev_mode = _setmode (fileno (to), _O_BINARY);
 #endif
 
+  pos = lseek(from, 0, SEEK_END);
+  if (pos == -1L)
+    O (error, NILF, "lseek() to end failed");
+  
+  buffer = (char*) malloc(pos * 2);
+
   if (lseek (from, 0, SEEK_SET) == -1)
-    perror ("lseek()");
+    O (error, NILF, "lseek() to beginning failed");
 
   while (1)
+  {
+    EINTRLOOP (len, read (from, buffer, pos));
+    if (len < 0)
+      O (error, NILF, "read() failed");
+    if (len <= 0)
+      break;
+    buffer[len+1] = 0;
+
+    if (replace_string(buffer, &len, " error ", " \033[91merror\033[0m "))
+      O (error, NILF, "Buffer overflow adding error");
+
+    if (replace_string(buffer, &len, " warning ", " \033[93mwarning\033[0m "))
+      O (error, NILF, "Buffer overflow adding warning");
+
+    if (len > pos * 2)
     {
-      int len;
-      EINTRLOOP (len, read (from, buffer, sizeof (buffer)));
-      if (len < 0)
-        perror ("read()");
-      if (len <= 0)
-        break;
-      if (fwrite (buffer, len, 1, to) < 1)
-        {
-          perror ("fwrite()");
-          break;
-        }
-      fflush (to);
+      O (error, NILF, "Buffer overflow");
+      len = pos * 2;
+      buffer[len] = 0;
     }
+
+    if (fwrite (buffer, len, 1, to) < 1)
+    {
+      O (error, NILF, "fwrite() failed");
+      break;
+    }
+    fflush (to);
+  }
+
+  free(buffer);
 
 #ifdef WINDOWS32
   /* Switch "to" back to its original mode, so that log messages by
@@ -437,6 +462,37 @@ message (int prefix, size_t len, const char *fmt, ...)
   outputs (0, start);
 }
 
+/* Print a warning message.  */
+
+void
+warning (const floc *flocp, size_t len, const char *fmt, ...)
+{
+  va_list args;
+  char *p;
+
+  len += (strlen (fmt) + strlen (program)
+          + (flocp && flocp->filenm ? strlen (flocp->filenm) : 0)
+          + INTSTR_LENGTH + 4 + 1 + 1 + 7);
+  p = get_buffer (len);
+
+  if (flocp && flocp->filenm)
+    sprintf (p, "\033[93m%s:%lu: ", flocp->filenm, flocp->lineno + flocp->offset);
+  else if (makelevel == 0)
+    sprintf (p, "\033[93m%s: ", program);
+  else
+    sprintf (p, "\033[93m%s[%u]: ", program, makelevel);
+  p += strlen (p);
+
+  va_start (args, fmt);
+  vsprintf (p, fmt, args);
+  va_end (args);
+
+  strcat (p, "\033[0m\n");
+
+  assert (fmtbuf.buffer[len-1] == '\0');
+  outputs (1, fmtbuf.buffer);
+}
+
 /* Print an error message.  */
 
 void
@@ -448,22 +504,22 @@ error (const floc *flocp, size_t len, const char *fmt, ...)
 
   len += (strlen (fmt) + strlen (program)
           + (flocp && flocp->filenm ? strlen (flocp->filenm) : 0)
-          + INTSTR_LENGTH + 4 + 1 + 1);
+          + INTSTR_LENGTH + 4 + 1 + 1 + 7);
   start = p = get_buffer (len);
 
   if (flocp && flocp->filenm)
-    sprintf (p, "%s:%lu: ", flocp->filenm, flocp->lineno + flocp->offset);
+    sprintf (p, "\033[91m%s:%lu: ", flocp->filenm, flocp->lineno + flocp->offset);
   else if (makelevel == 0)
-    sprintf (p, "%s: ", program);
+    sprintf (p, "\033[91m%s: ", program);
   else
-    sprintf (p, "%s[%u]: ", program, makelevel);
+    sprintf (p, "\033[91m%s[%u]: ", program, makelevel);
   p += strlen (p);
 
   va_start (args, fmt);
   vsprintf (p, fmt, args);
   va_end (args);
 
-  strcat (p, "\n");
+  strcat (p, "\033[0m\n");
 
   assert (start[len-1] == '\0');
   outputs (1, start);
@@ -475,21 +531,21 @@ void
 fatal (const floc *flocp, size_t len, const char *fmt, ...)
 {
   va_list args;
-  const char *stop = _(".  Stop.\n");
+  const char *stop = _(".  Stop.\033[0m\n");
   char *start;
   char *p;
 
   len += (strlen (fmt) + strlen (program)
           + (flocp && flocp->filenm ? strlen (flocp->filenm) : 0)
-          + INTSTR_LENGTH + 8 + strlen (stop) + 1);
+          + INTSTR_LENGTH + 8 + strlen (stop) + 1 + 7);
   start = p = get_buffer (len);
 
   if (flocp && flocp->filenm)
-    sprintf (p, "%s:%lu: *** ", flocp->filenm, flocp->lineno + flocp->offset);
+    sprintf (p, "\033[91m%s:%lu: *** ", flocp->filenm, flocp->lineno + flocp->offset);
   else if (makelevel == 0)
-    sprintf (p, "%s: *** ", program);
+    sprintf (p, "\033[91m%s: *** ", program);
   else
-    sprintf (p, "%s[%u]: *** ", program, makelevel);
+    sprintf (p, "\033[91m%s[%u]: *** ", program, makelevel);
   p += strlen (p);
 
   va_start (args, fmt);
@@ -510,7 +566,7 @@ void
 perror_with_name (const char *str, const char *name)
 {
   const char *err = strerror (errno);
-  OSSS (error, NILF, _("%s%s: %s"), str, name, err);
+  OSSS (error, NILF, _("\033[91m%s%s: %s\033[0m"), str, name, err);
 }
 
 /* Print an error message from errno and exit.  */
@@ -519,7 +575,7 @@ void
 pfatal_with_name (const char *name)
 {
   const char *err = strerror (errno);
-  OSS (fatal, NILF, _("%s: %s"), name, err);
+  OSS (fatal, NILF, _("\033[91m%s: %s\033[0m"), name, err);
 
   /* NOTREACHED */
 }
@@ -535,3 +591,34 @@ out_of_memory ()
   writebuf (FD_STDOUT, STRING_SIZE_TUPLE (": *** virtual memory exhausted\n"));
   exit (MAKE_FAILURE);
 }
+
+int replace_string(char* str, int *len, char* find, char* replace_str)
+{
+  int len_find = strlen(find), len_replace = strlen(replace_str);
+  int len_move = 0;
+  if (len_find != len_replace)
+  {
+    int len_inc = (len_replace - len_find);
+    for (char* ptr = str; ptr = strstr(ptr, find); ++ptr)
+	{
+      len_move = (*len - (ptr - str) + len_inc);
+      if (len_move > 0)
+        memmove(ptr+len_replace, ptr+len_find, len_move);
+      else
+        return 1;
+      memcpy(ptr, replace_str, len_replace);
+	  *len += len_inc;
+    }
+    return 0;
+  }
+  else
+  {
+    for (char* ptr = str; ptr = strstr(ptr, find); ++ptr)
+	{
+      memcpy(ptr, replace_str, len_replace);
+    }
+    return 0;
+  }
+  return 0;
+}
+    
