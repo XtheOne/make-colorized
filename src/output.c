@@ -180,10 +180,10 @@ pump_from_tmp (int from, FILE *to)
       break;
     buffer[len+1] = 0;
 
-    if (replace_string(buffer, &len, " error ", " \033[91merror\033[0m "))
+    if (replace_string(buffer, &len, " error ", " \33[91merror\33[0m "))
       O (error, NILF, "Buffer overflow adding error");
 
-    if (replace_string(buffer, &len, " warning ", " \033[93mwarning\033[0m "))
+    if (replace_string(buffer, &len, " warning ", " \33[95mwarning\33[0m "))
       O (error, NILF, "Buffer overflow adding warning");
 
     if (len > pos * 2)
@@ -472,22 +472,22 @@ warning (const floc *flocp, size_t len, const char *fmt, ...)
 
   len += (strlen (fmt) + strlen (program)
           + (flocp && flocp->filenm ? strlen (flocp->filenm) : 0)
-          + INTSTR_LENGTH + 4 + 1 + 1 + 7);
+          + INTSTR_LENGTH + 4 + 1 + 1 + 6);
   p = get_buffer (len);
 
   if (flocp && flocp->filenm)
-    sprintf (p, "\033[93m%s:%lu: ", flocp->filenm, flocp->lineno + flocp->offset);
+    sprintf (p, "\33[93m%s:%lu: ", flocp->filenm, flocp->lineno + flocp->offset);
   else if (makelevel == 0)
-    sprintf (p, "\033[93m%s: ", program);
+    sprintf (p, "\33[93m%s: ", program);
   else
-    sprintf (p, "\033[93m%s[%u]: ", program, makelevel);
+    sprintf (p, "\33[93m%s[%u]: ", program, makelevel);
   p += strlen (p);
 
   va_start (args, fmt);
   vsprintf (p, fmt, args);
   va_end (args);
 
-  strcat (p, "\033[0m\n");
+  strcat (p, "\33[0m\n");
 
   assert (fmtbuf.buffer[len-1] == '\0');
   outputs (1, fmtbuf.buffer);
@@ -504,22 +504,22 @@ error (const floc *flocp, size_t len, const char *fmt, ...)
 
   len += (strlen (fmt) + strlen (program)
           + (flocp && flocp->filenm ? strlen (flocp->filenm) : 0)
-          + INTSTR_LENGTH + 4 + 1 + 1 + 7);
+          + INTSTR_LENGTH + 4 + 1 + 1 + 6);
   start = p = get_buffer (len);
 
   if (flocp && flocp->filenm)
-    sprintf (p, "\033[91m%s:%lu: ", flocp->filenm, flocp->lineno + flocp->offset);
+    sprintf (p, "\33[91m%s:%lu: ", flocp->filenm, flocp->lineno + flocp->offset);
   else if (makelevel == 0)
-    sprintf (p, "\033[91m%s: ", program);
+    sprintf (p, "\33[91m%s: ", program);
   else
-    sprintf (p, "\033[91m%s[%u]: ", program, makelevel);
+    sprintf (p, "\33[91m%s[%u]: ", program, makelevel);
   p += strlen (p);
 
   va_start (args, fmt);
   vsprintf (p, fmt, args);
   va_end (args);
 
-  strcat (p, "\033[0m\n");
+  strcat (p, "\33[0m\n");
 
   assert (start[len-1] == '\0');
   outputs (1, start);
@@ -531,21 +531,21 @@ void
 fatal (const floc *flocp, size_t len, const char *fmt, ...)
 {
   va_list args;
-  const char *stop = _(".  Stop.\033[0m\n");
+  const char *stop = _(".  Stop.\33[0m\n");
   char *start;
   char *p;
 
   len += (strlen (fmt) + strlen (program)
           + (flocp && flocp->filenm ? strlen (flocp->filenm) : 0)
-          + INTSTR_LENGTH + 8 + strlen (stop) + 1 + 7);
+          + INTSTR_LENGTH + 8 + strlen (stop) + 1 + 6);
   start = p = get_buffer (len);
 
   if (flocp && flocp->filenm)
-    sprintf (p, "\033[91m%s:%lu: *** ", flocp->filenm, flocp->lineno + flocp->offset);
+    sprintf (p, "\33[91m%s:%lu: *** ", flocp->filenm, flocp->lineno + flocp->offset);
   else if (makelevel == 0)
-    sprintf (p, "\033[91m%s: *** ", program);
+    sprintf (p, "\33[91m%s: *** ", program);
   else
-    sprintf (p, "\033[91m%s[%u]: *** ", program, makelevel);
+    sprintf (p, "\33[91m%s[%u]: *** ", program, makelevel);
   p += strlen (p);
 
   va_start (args, fmt);
@@ -566,7 +566,7 @@ void
 perror_with_name (const char *str, const char *name)
 {
   const char *err = strerror (errno);
-  OSSS (error, NILF, _("\033[91m%s%s: %s\033[0m"), str, name, err);
+  OSSS (error, NILF, _("\33[91m%s%s: %s\33[0m"), str, name, err);
 }
 
 /* Print an error message from errno and exit.  */
@@ -575,7 +575,7 @@ void
 pfatal_with_name (const char *name)
 {
   const char *err = strerror (errno);
-  OSS (fatal, NILF, _("\033[91m%s: %s\033[0m"), name, err);
+  OSS (fatal, NILF, _("\33[91m%s: %s\33[0m"), name, err);
 
   /* NOTREACHED */
 }
