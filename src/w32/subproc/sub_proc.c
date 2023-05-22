@@ -1,5 +1,5 @@
 /* Process handling for Windows.
-Copyright (C) 1996-2022 Free Software Foundation, Inc.
+Copyright (C) 1996-2023 Free Software Foundation, Inc.
 This file is part of GNU Make.
 
 GNU Make is free software; you can redistribute it and/or modify it under the
@@ -887,7 +887,7 @@ proc_stderr_thread(sub_process *pproc)
 
         for (;;) {
                 if (ReadFile( (HANDLE)pproc->sv_stderr[0], &c, 1, &nread, NULL) == FALSE) {
-                        map_windows32_error_to_string(GetLastError());
+/*                      map_windows32_error_to_string(GetLastError());*/
                         _endthreadex(0);
                 }
                 if (nread == 0)

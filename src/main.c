@@ -1,5 +1,5 @@
 /* Argument parsing and main program of GNU Make.
-Copyright (C) 1988-2022 Free Software Foundation, Inc.
+Copyright (C) 1988-2023 Free Software Foundation, Inc.
 This file is part of GNU Make.
 
 GNU Make is free software; you can redistribute it and/or modify it under the
@@ -34,9 +34,6 @@ this program.  If not, see <https://www.gnu.org/licenses/>.  */
 #ifdef WINDOWS32
 # include <windows.h>
 # include <io.h>
-#ifdef HAVE_STRINGS_H
-# include <strings.h> /* for strcasecmp */
-#endif
 # include "pathstuff.h"
 # include "sub_proc.h"
 # include "w32err.h"
@@ -105,8 +102,10 @@ double atof ();
 static void clean_jobserver (int status);
 static void print_data_base (void);
 static void print_version (void);
-static void decode_switches (int argc, const char **argv, int env);
-static struct variable *define_makeflags (int all, int makefile);
+static void decode_switches (int argc, const char **argv,
+                             enum variable_origin origin);
+static void decode_env_switches (const char *envar, size_t len,
+                                 enum variable_origin origin);
 static char *quote_for_env (char *out, const char *in);
 static void initialize_global_hash_tables (void);
 
@@ -136,6 +135,7 @@ int verify_flag;
 
 static int silent_flag;
 static const int default_silent_flag = 0;
+static enum variable_origin silent_origin = o_default;
 
 /* Nonzero means either -s was given, or .SILENT-with-no-deps was seen.  */
 
@@ -190,16 +190,15 @@ int no_builtin_variables_flag = 0;
 
 int keep_going_flag;
 static const int default_keep_going_flag = 0;
+static enum variable_origin keep_going_origin = o_default;
 
 /* Nonzero means check symlink mtimes.  */
 
 int check_symlink_flag = 0;
 
-/* Nonzero means print directory before starting and when done (-w).  */
-
-int print_directory;
 static int print_directory_flag = -1;
 static const int default_print_directory_flag = -1;
+static enum variable_origin print_directory_origin = o_default;
 
 /* Nonzero means print version information.  */
 
@@ -235,6 +234,7 @@ static const int inf_jobs = 0;
 char *jobserver_auth = NULL;
 
 /* Style for the jobserver.  */
+
 static char *jobserver_style = NULL;
 
 /* Shuffle mode for goals and prerequisites.  */
@@ -297,6 +297,9 @@ struct variable shell_var;
 /* This character introduces a command: it's the first char on the line.  */
 
 char cmd_prefix = '\t';
+
+/* Whether or not .NOTINTERMEDIATE with no prerequisites was given.  */
+unsigned int no_intermediates;
 
 /* Count the number of commands we've invoked, that might change something in
    the filesystem.  Start with 1 so calloc'd memory never matches.  */
@@ -405,30 +408,34 @@ static int trace_flag = 0;
 
 struct command_switch
   {
-    int c;                      /* The switch character.  */
+    int c;                        /* The switch character.  */
 
-    enum                        /* Type of the value.  */
+    enum                          /* Type of the value.  */
       {
-        flag,                   /* Turn int flag on.  */
-        flag_off,               /* Turn int flag off.  */
-        string,                 /* One string per invocation.  */
-        strlist,                /* One string per switch.  */
-        filename,               /* A string containing a file name.  */
-        positive_int,           /* A positive integer.  */
-        floating,               /* A floating-point number (double).  */
-        ignore                  /* Ignored.  */
+        flag,                     /* Turn int flag on.  */
+        flag_off,                 /* Turn int flag off.  */
+        string,                   /* One string per invocation.  */
+        strlist,                  /* One string per switch.  */
+        filename,                 /* A string containing a file name.  */
+        positive_int,             /* A positive integer.  */
+        floating,                 /* A floating-point number (double).  */
+        ignore                    /* Ignored.  */
       } type;
 
-    void *value_ptr;    /* Pointer to the value-holding variable.  */
+    void *value_ptr;              /* Pointer to the value-holding variable.  */
 
-    unsigned int env:1;         /* Can come from MAKEFLAGS.  */
-    unsigned int toenv:1;       /* Should be put in MAKEFLAGS.  */
-    unsigned int no_makefile:1; /* Don't propagate when remaking makefiles.  */
+    unsigned int env:1;           /* Can come from MAKEFLAGS.  */
+    unsigned int toenv:1;         /* Should be put in MAKEFLAGS.  */
+    unsigned int no_makefile:1;   /* Don't propagate when remaking makefiles. */
+    unsigned int specified:1;     /* Set if the switch was specified somewhere.
+                                     Allows switches that are ON by default to
+                                     appear in MAKEFLAGS when set explicitly. */
 
-    const void *noarg_value;    /* Pointer to value used if no arg given.  */
-    const void *default_value;  /* Pointer to default value.  */
+    const void *noarg_value;      /* Pointer to value used if no arg given.  */
+    const void *default_value;    /* Pointer to default value.  */
 
-    const char *long_name;      /* Long option name.  */
+    const char *long_name;        /* Long option name.  */
+    enum variable_origin *origin; /* Origin of the value.  */
   };
 
 /* The table of command switches.
@@ -437,63 +444,64 @@ struct command_switch
 
 #define TEMP_STDIN_OPT (CHAR_MAX+10)
 
-static const struct command_switch switches[] =
+static struct command_switch switches[] =
   {
-    { 'b', ignore, 0, 0, 0, 0, 0, 0, 0 },
-    { 'B', flag, &always_make_set, 1, 1, 0, 0, 0, "always-make" },
-    { 'd', flag, &debug_flag, 1, 1, 0, 0, 0, 0 },
-    { 'e', flag, &env_overrides, 1, 1, 0, 0, 0, "environment-overrides", },
-    { 'E', strlist, &eval_strings, 1, 0, 0, 0, 0, "eval" },
-    { 'h', flag, &print_usage_flag, 0, 0, 0, 0, 0, "help" },
-    { 'i', flag, &ignore_errors_flag, 1, 1, 0, 0, 0, "ignore-errors" },
-    { 'k', flag, &keep_going_flag, 1, 1, 0, 0, &default_keep_going_flag,
-      "keep-going" },
-    { 'L', flag, &check_symlink_flag, 1, 1, 0, 0, 0, "check-symlink-times" },
-    { 'm', ignore, 0, 0, 0, 0, 0, 0, 0 },
-    { 'n', flag, &just_print_flag, 1, 1, 1, 0, 0, "just-print" },
-    { 'p', flag, &print_data_base_flag, 1, 1, 0, 0, 0, "print-data-base" },
-    { 'q', flag, &question_flag, 1, 1, 1, 0, 0, "question" },
-    { 'r', flag, &no_builtin_rules_flag, 1, 1, 0, 0, 0, "no-builtin-rules" },
-    { 'R', flag, &no_builtin_variables_flag, 1, 1, 0, 0, 0,
-      "no-builtin-variables" },
-    { 's', flag, &silent_flag, 1, 1, 0, 0, &default_silent_flag, "silent" },
-    { 'S', flag_off, &keep_going_flag, 1, 1, 0, 0, &default_keep_going_flag,
-      "no-keep-going" },
-    { 't', flag, &touch_flag, 1, 1, 1, 0, 0, "touch" },
-    { 'v', flag, &print_version_flag, 1, 0, 0, 0, 0, "version" },
-    { 'w', flag, &print_directory_flag, 1, 1, 0, 0,
-      &default_print_directory_flag, "print-directory" },
+    { 'b', ignore, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+    { 'B', flag, &always_make_set, 1, 1, 0, 0, 0, 0, "always-make", 0 },
+    { 'd', flag, &debug_flag, 1, 1, 0, 0, 0, 0, 0, 0 },
+    { 'e', flag, &env_overrides, 1, 1, 0, 0, 0, 0, "environment-overrides", 0 },
+    { 'E', strlist, &eval_strings, 1, 0, 0, 0, 0, 0, "eval", 0 },
+    { 'h', flag, &print_usage_flag, 0, 0, 0, 0, 0, 0, "help", 0 },
+    { 'i', flag, &ignore_errors_flag, 1, 1, 0, 0, 0, 0, "ignore-errors", 0 },
+    { 'k', flag, &keep_going_flag, 1, 1, 0, 0, 0, &default_keep_going_flag,
+      "keep-going", &keep_going_origin },
+    { 'L', flag, &check_symlink_flag, 1, 1, 0, 0, 0, 0, "check-symlink-times", 0 },
+    { 'm', ignore, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+    { 'n', flag, &just_print_flag, 1, 1, 1, 0, 0, 0, "just-print", 0 },
+    { 'p', flag, &print_data_base_flag, 1, 1, 0, 0, 0, 0, "print-data-base", 0 },
+    { 'q', flag, &question_flag, 1, 1, 1, 0, 0, 0, "question", 0 },
+    { 'r', flag, &no_builtin_rules_flag, 1, 1, 0, 0, 0, 0, "no-builtin-rules", 0 },
+    { 'R', flag, &no_builtin_variables_flag, 1, 1, 0, 0, 0, 0,
+      "no-builtin-variables", 0 },
+    { 's', flag, &silent_flag, 1, 1, 0, 0, 0, &default_silent_flag, "silent",
+      &silent_origin },
+    { 'S', flag_off, &keep_going_flag, 1, 1, 0, 0, 0, &default_keep_going_flag,
+      "no-keep-going", &keep_going_origin },
+    { 't', flag, &touch_flag, 1, 1, 1, 0, 0, 0, "touch", 0 },
+    { 'v', flag, &print_version_flag, 1, 0, 0, 0, 0, 0, "version", 0 },
+    { 'w', flag, &print_directory_flag, 1, 1, 0, 0, 0,
+      &default_print_directory_flag, "print-directory", &print_directory_origin },
 
     /* These options take arguments.  */
-    { 'C', filename, &directories, 0, 0, 0, 0, 0, "directory" },
-    { 'f', filename, &makefiles, 0, 0, 0, 0, 0, "file" },
-    { 'I', filename, &include_dirs, 1, 1, 0, 0, 0,
-      "include-dir" },
-    { 'j', positive_int, &arg_job_slots, 1, 1, 0, &inf_jobs, &default_job_slots,
-      "jobs" },
-    { 'l', floating, &max_load_average, 1, 1, 0, &default_load_average,
-      &default_load_average, "load-average" },
-    { 'o', filename, &old_files, 0, 0, 0, 0, 0, "old-file" },
-    { 'O', string, &output_sync_option, 1, 1, 0, "target", 0, "output-sync" },
-    { 'W', filename, &new_files, 0, 0, 0, 0, 0, "what-if" },
+    { 'C', filename, &directories, 0, 0, 0, 0, 0, 0, "directory", 0 },
+    { 'f', filename, &makefiles, 0, 0, 0, 0, 0, 0, "file", 0 },
+    { 'I', filename, &include_dirs, 1, 1, 0, 0, 0, 0,
+      "include-dir", 0 },
+    { 'j', positive_int, &arg_job_slots, 1, 1, 0, 0, &inf_jobs, &default_job_slots,
+      "jobs", 0 },
+    { 'l', floating, &max_load_average, 1, 1, 0, 0, &default_load_average,
+      &default_load_average, "load-average", 0 },
+    { 'o', filename, &old_files, 0, 0, 0, 0, 0, 0, "old-file", 0 },
+    { 'O', string, &output_sync_option, 1, 1, 0, 0, "target", 0, "output-sync", 0 },
+    { 'W', filename, &new_files, 0, 0, 0, 0, 0, 0, "what-if", 0 },
 
     /* These are long-style options.  */
-    { CHAR_MAX+1, strlist, &db_flags, 1, 1, 0, "basic", 0, "debug" },
-    { CHAR_MAX+2, string, &jobserver_auth, 1, 1, 0, 0, 0, JOBSERVER_AUTH_OPT },
-    { CHAR_MAX+3, flag, &trace_flag, 1, 1, 0, 0, 0, "trace" },
-    { CHAR_MAX+4, flag_off, &print_directory_flag, 1, 1, 0, 0,
-      &default_print_directory_flag, "no-print-directory" },
-    { CHAR_MAX+5, flag, &warn_undefined_variables_flag, 1, 1, 0, 0, 0,
-      "warn-undefined-variables" },
-    { CHAR_MAX+7, string, &sync_mutex, 1, 1, 0, 0, 0, "sync-mutex" },
-    { CHAR_MAX+8, flag_off, &silent_flag, 1, 1, 0, 0, &default_silent_flag,
-      "no-silent" },
-    { CHAR_MAX+9, string, &jobserver_auth, 1, 0, 0, 0, 0, "jobserver-fds" },
+    { CHAR_MAX+1, strlist, &db_flags, 1, 1, 0, 0, "basic", 0, "debug", 0 },
+    { CHAR_MAX+2, string, &jobserver_auth, 1, 1, 0, 0, 0, 0, JOBSERVER_AUTH_OPT, 0 },
+    { CHAR_MAX+3, flag, &trace_flag, 1, 1, 0, 0, 0, 0, "trace", 0 },
+    { CHAR_MAX+4, flag_off, &print_directory_flag, 1, 1, 0, 0, 0,
+      &default_print_directory_flag, "no-print-directory", &print_directory_origin },
+    { CHAR_MAX+5, flag, &warn_undefined_variables_flag, 1, 1, 0, 0, 0, 0,
+      "warn-undefined-variables", 0 },
+    { CHAR_MAX+7, string, &sync_mutex, 1, 1, 0, 0, 0, 0, "sync-mutex", 0 },
+    { CHAR_MAX+8, flag_off, &silent_flag, 1, 1, 0, 0, 0, &default_silent_flag,
+      "no-silent", &silent_origin },
+    { CHAR_MAX+9, string, &jobserver_auth, 1, 0, 0, 0, 0, 0, "jobserver-fds", 0 },
     /* There is special-case handling for this in decode_switches() as well.  */
-    { TEMP_STDIN_OPT, filename, &makefiles, 0, 0, 0, 0, 0, "temp-stdin" },
-    { CHAR_MAX+11, string, &shuffle_mode, 1, 1, 0, "random", 0, "shuffle" },
-    { CHAR_MAX+12, string, &jobserver_style, 1, 0, 0, 0, 0, "jobserver-style" },
-    { 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+    { TEMP_STDIN_OPT, filename, &makefiles, 0, 0, 0, 0, 0, 0, "temp-stdin", 0 },
+    { CHAR_MAX+11, string, &shuffle_mode, 1, 1, 0, 0, "random", 0, "shuffle", 0 },
+    { CHAR_MAX+12, string, &jobserver_style, 1, 0, 0, 0, 0, 0, "jobserver-style", 0 },
+    { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
   };
 
 /* Secondary long names for options.  */
@@ -689,7 +697,7 @@ initialize_stopchar_map (void)
 
 /* This code is stolen from gnulib.
    If/when we abandon the requirement to work with K&R compilers, we can
-   remove this (and perhaps other parts of GNU make!) and migrate to using
+   remove this (and perhaps other parts of GNU Make!) and migrate to using
    gnulib directly.
 
    This is called only through atexit(), which means die() has already been
@@ -1153,7 +1161,11 @@ temp_stdin_unlink ()
     }
 }
 
-#ifdef _AMIGA
+#ifdef MK_OS_ZOS
+extern char **environ;
+#endif
+
+#if defined(_AMIGA) || defined(MK_OS_ZOS)
 int
 main (int argc, char **argv)
 #else
@@ -1437,7 +1449,7 @@ main (int argc, char **argv, char **envp)
 #endif
 #ifdef MAKE_JOBSERVER
                            " jobserver"
-# ifdef HAVE_MKFIFO
+# if JOBSERVER_USE_FIFO
                            " jobserver-fifo"
 # endif
 #endif
@@ -1453,6 +1465,9 @@ main (int argc, char **argv, char **envp)
 #ifdef MAKE_LOAD
                            " load"
 #endif
+#ifdef HAVE_DOS_PATHS
+                           " dospaths"
+#endif
 #ifdef MAKE_MAINTAINER_MODE
                            " maintainer"
 #endif
@@ -1467,6 +1482,10 @@ main (int argc, char **argv, char **envp)
   /* Read in variables from the environment.  It is important that this be
      done before $(MAKE) is figured out so its definitions will not be
      from the environment.  */
+
+#ifdef MK_OS_ZOS
+  char **envp = environ;
+#endif
 
 #ifndef _AMIGA
   {
@@ -1573,13 +1592,16 @@ main (int argc, char **argv, char **envp)
   /* Decode the switches.  */
   if (lookup_variable (STRING_SIZE_TUPLE (GNUMAKEFLAGS_NAME)))
     {
-      decode_env_switches (STRING_SIZE_TUPLE (GNUMAKEFLAGS_NAME));
+      decode_env_switches (STRING_SIZE_TUPLE (GNUMAKEFLAGS_NAME), o_command);
 
       /* Clear GNUMAKEFLAGS to avoid duplication.  */
       define_variable_cname (GNUMAKEFLAGS_NAME, "", o_env, 0);
     }
 
-  decode_env_switches (STRING_SIZE_TUPLE (MAKEFLAGS_NAME));
+   /* Set MAKEFLAGS's origin to command line: in submakes MAKEFLAGS will carry
+      command line switches.  This causes env variable MAKEFLAGS to beat
+      makefile modifications to MAKEFLAGS.  */
+  decode_env_switches (STRING_SIZE_TUPLE (MAKEFLAGS_NAME), o_command);
 
 #if 0
   /* People write things like:
@@ -1600,7 +1622,7 @@ main (int argc, char **argv, char **envp)
     int env_slots = arg_job_slots;
     arg_job_slots = INVALID_JOB_SLOTS;
 
-    decode_switches (argc, (const char **)argv, 0);
+    decode_switches (argc, (const char **)argv, o_command);
     argv_slots = arg_job_slots;
 
     if (arg_job_slots == INVALID_JOB_SLOTS)
@@ -1679,14 +1701,6 @@ main (int argc, char **argv, char **envp)
 
   /* Set always_make_flag if -B was given and we've not restarted already.  */
   always_make_flag = always_make_set && (restarts == 0);
-
-  /* If the user didn't specify any print-directory options, compute the
-     default setting: disable under -s / print in sub-makes and under -C.  */
-
-  if (print_directory_flag == -1)
-    print_directory = !silent_flag && (directories != 0 || makelevel > 0);
-  else
-    print_directory = print_directory_flag;
 
   /* If -R was given, set -r too (doesn't make sense otherwise!)  */
   if (no_builtin_variables_flag)
@@ -1813,6 +1827,10 @@ main (int argc, char **argv, char **envp)
 
   define_variable_cname ("CURDIR", current_directory, o_file, 0);
 
+  /* Construct the list of include directories to search.
+     This will check for existence so it must be done after chdir.  */
+  construct_include_path (include_dirs ? include_dirs->list : NULL);
+
   /* Validate the arg_job_slots configuration before we define MAKEFLAGS so
      users get an accurate value in their makefiles.
      At this point arg_job_slots is the argv setting, if there is one, else
@@ -1904,7 +1922,7 @@ main (int argc, char **argv, char **envp)
          allow the user's setting of MAKEOVERRIDES to affect MAKEFLAGS, so
          a reference to this hidden variable is written instead. */
       define_variable_cname ("MAKEOVERRIDES", "${-*-command-variables-*-}",
-                             o_env, 1);
+                             o_default, 1);
 #ifdef VMS
       vms_export_dcl_symbol ("MAKEOVERRIDES", "${-*-command-variables-*-}");
 #endif
@@ -1989,7 +2007,7 @@ main (int argc, char **argv, char **envp)
 # endif
   }
 
-#ifdef HAVE_PSELECT
+#if defined(HAVE_PSELECT) && !defined(MK_OS_ZOS)
   /* If we have pselect() then we need to block SIGCHLD so it's deferred.  */
   {
     sigset_t block;
@@ -2011,19 +2029,12 @@ main (int argc, char **argv, char **envp)
   /* Define the initial list of suffixes for old-style rules.  */
   set_default_suffixes ();
 
-  /* Define the file rules for the built-in suffix rules.  These will later
-     be converted into pattern rules.  We used to do this in
-     install_default_implicit_rules, but since that happens after reading
-     makefiles, it results in the built-in pattern rules taking precedence
-     over makefile-specified suffix rules, which is wrong.  */
-  install_default_suffix_rules ();
-
   /* Define some internal and special variables.  */
   define_automatic_variables ();
 
   /* Set up the MAKEFLAGS and MFLAGS variables for makefiles to see.
      Initialize it to be exported but allow the makefile to reset it.  */
-  define_makeflags (0, 0)->export = v_export;
+  define_makeflags (0)->export = v_export;
 
   /* Define the default variables.  */
   define_default_variables ();
@@ -2073,12 +2084,12 @@ main (int argc, char **argv, char **envp)
     arg_job_slots = INVALID_JOB_SLOTS;
 
     /* Decode switches again, for variables set by the makefile.  */
-    decode_env_switches (STRING_SIZE_TUPLE (GNUMAKEFLAGS_NAME));
+    decode_env_switches (STRING_SIZE_TUPLE (GNUMAKEFLAGS_NAME), o_env);
 
     /* Clear GNUMAKEFLAGS to avoid duplication.  */
     define_variable_cname (GNUMAKEFLAGS_NAME, "", o_override, 0);
 
-    decode_env_switches (STRING_SIZE_TUPLE (MAKEFLAGS_NAME));
+    decode_env_switches (STRING_SIZE_TUPLE (MAKEFLAGS_NAME), o_env);
 #if 0
     decode_env_switches (STRING_SIZE_TUPLE ("MFLAGS"));
 #endif
@@ -2262,12 +2273,17 @@ main (int argc, char **argv, char **envp)
 
   /* Set up MAKEFLAGS and MFLAGS again, so they will be right.  */
 
-  define_makeflags (1, 0);
+  define_makeflags (0);
 
   /* Make each 'struct goaldep' point at the 'struct file' for the file
      depended on.  Also do magic for special targets.  */
 
   snap_deps ();
+
+  /* Define the file rules for the built-in suffix rules.  These will later
+     be converted into pattern rules.  */
+
+  install_default_suffix_rules ();
 
   /* Convert old-style suffix rules to pattern rules.  It is important to
      do this before installing the built-in pattern rules below, so that
@@ -2422,7 +2438,7 @@ main (int argc, char **argv, char **envp)
       }
 
       /* Set up 'MAKEFLAGS' specially while remaking makefiles.  */
-      define_makeflags (1, 1);
+      define_makeflags (1);
 
       {
         int orig_db_level = db_level;
@@ -2785,7 +2801,7 @@ main (int argc, char **argv, char **envp)
             child.output.syncout = 0;
             child.environment = environ;
 
-            pid = child_execute_job (&child, 1, nargv);
+            pid = child_execute_job (&child, 1, (char **)nargv);
 
             /* is this loop really necessary? */
             do {
@@ -2814,7 +2830,7 @@ main (int argc, char **argv, char **envp)
     }
 
   /* Set up 'MAKEFLAGS' again for the normal targets.  */
-  define_makeflags (1, 0);
+  define_makeflags (0);
 
   /* Set always_make_flag if -B was given.  */
   always_make_flag = always_make_set;
@@ -3002,7 +3018,7 @@ init_switches (void)
 
 /* Non-option argument.  It might be a variable definition.  */
 static void
-handle_non_switch_argument (const char *arg, int env)
+handle_non_switch_argument (const char *arg, enum variable_origin origin)
 {
   struct variable *v;
 
@@ -3035,7 +3051,7 @@ handle_non_switch_argument (const char *arg, int env)
       }
   }
 #endif
-  v = try_variable_definition (0, arg, o_command, 0);
+  v = try_variable_definition (0, arg, origin, 0);
   if (v != 0)
     {
       /* It is indeed a variable definition.  If we don't already have this
@@ -3055,11 +3071,12 @@ handle_non_switch_argument (const char *arg, int env)
           command_variables = cv;
         }
     }
-  else if (! env)
+  else if (arg[0] != '\0' && origin == o_command)
     {
-      /* Not an option or variable definition; it must be a goal
-         target!  Enter it as a file and add it to the dep chain of
-         goals.  */
+      /* Not an option or variable definition; it must be a goal target.
+         Enter it as a file and add it to the dep chain of goals.
+         Check ARG[0] because if the top makefile resets MAKEOVERRIDES
+         then ARG points to an empty string in the submake.  */
       struct file *f = enter_file (strcache_add (expand_command_line_file (arg)));
       f->cmd_target = 1;
 
@@ -3103,14 +3120,23 @@ handle_non_switch_argument (const char *arg, int env)
     }
 }
 
+/* Called if the makefile resets the MAKEFLAGS variable.  */
+void
+reset_makeflags (enum variable_origin origin)
+{
+  decode_env_switches (STRING_SIZE_TUPLE(MAKEFLAGS_NAME), origin);
+  construct_include_path (include_dirs ? include_dirs->list : NULL);
+  define_makeflags (rebuilding_makefiles);
+}
+
 /* Decode switches from ARGC and ARGV.
-   They came from the environment if ENV is nonzero.  */
+   They came from the environment if ORIGIN is o_env.  */
 
 static void
-decode_switches (int argc, const char **argv, int env)
+decode_switches (int argc, const char **argv, enum variable_origin origin)
 {
   int bad = 0;
-  const struct command_switch *cs;
+  struct command_switch *cs;
   struct stringlist *sl;
   int c;
 
@@ -3121,7 +3147,7 @@ decode_switches (int argc, const char **argv, int env)
 
   /* Let getopt produce error messages for the command line,
      but not for options from the environment.  */
-  opterr = !env;
+  opterr = origin == o_command;
   /* Reset getopt's state.  */
   optind = 0;
 
@@ -3137,7 +3163,7 @@ decode_switches (int argc, const char **argv, int env)
         break;
       else if (c == 1)
         /* An argument not starting with a dash.  */
-        handle_non_switch_argument (coptarg, env);
+        handle_non_switch_argument (coptarg, origin);
       else if (c == '?')
         /* Bad option.  We will print a usage message and die later.
            But continue to parse the other options so the user can
@@ -3151,7 +3177,12 @@ decode_switches (int argc, const char **argv, int env)
                  this switch.  We test this individually inside the
                  switch below rather than just once outside it, so that
                  options which are to be ignored still consume args.  */
-              int doit = !env || cs->env;
+              int doit = (origin == o_command
+                          || (cs->env &&
+                              (cs->origin == NULL || origin >= *cs->origin)));
+
+              if (doit)
+                cs->specified = 1;
 
               switch (cs->type)
                 {
@@ -3164,7 +3195,11 @@ decode_switches (int argc, const char **argv, int env)
                 case flag:
                 case flag_off:
                   if (doit)
-                    *(int *) cs->value_ptr = cs->type == flag;
+                    {
+                      *(int *) cs->value_ptr = cs->type == flag;
+                      if (cs->origin)
+                        *cs->origin = origin;
+                    }
                   break;
 
                 case string:
@@ -3197,6 +3232,8 @@ decode_switches (int argc, const char **argv, int env)
                       char **val = (char **)cs->value_ptr;
                       free (*val);
                       *val = xstrdup (coptarg);
+                      if (cs->origin)
+                        *cs->origin = origin;
                       break;
                     }
 
@@ -3230,7 +3267,11 @@ decode_switches (int argc, const char **argv, int env)
                     }
 
                   if (cs->type == strlist)
-                    sl->list[sl->idx++] = xstrdup (coptarg);
+                    {
+                      sl->list[sl->idx++] = xstrdup (coptarg);
+                      if (cs->origin)
+                        *cs->origin = origin;
+                    }
                   else if (cs->c == TEMP_STDIN_OPT)
                     {
                       if (stdin_offset > 0)
@@ -3238,9 +3279,15 @@ decode_switches (int argc, const char **argv, int env)
                       /* We don't need to expand the temp file.  */
                       stdin_offset = sl->idx;
                       sl->list[sl->idx++] = strcache_add (coptarg);
+                      if (cs->origin)
+                        *cs->origin = origin;
                     }
                   else
-                    sl->list[sl->idx++] = expand_command_line_file (coptarg);
+                    {
+                      sl->list[sl->idx++] = expand_command_line_file (coptarg);
+                      if (cs->origin)
+                        *cs->origin = origin;
+                    }
                   sl->list[sl->idx] = 0;
                   break;
 
@@ -3272,11 +3319,19 @@ decode_switches (int argc, const char **argv, int env)
                           bad = 1;
                         }
                       else
-                        *(unsigned int *) cs->value_ptr = i;
+                        {
+                          *(unsigned int *) cs->value_ptr = i;
+                          if (cs->origin)
+                            *cs->origin = origin;
+                        }
                     }
                   else
-                    *(unsigned int *) cs->value_ptr
-                      = *(unsigned int *) cs->noarg_value;
+                    {
+                      *(unsigned int *) cs->value_ptr
+                        = *(unsigned int *) cs->noarg_value;
+                      if (cs->origin)
+                        *cs->origin = origin;
+                    }
                   break;
 
                 case floating:
@@ -3285,8 +3340,12 @@ decode_switches (int argc, const char **argv, int env)
                     coptarg = argv[optind++];
 
                   if (doit)
-                    *(double *) cs->value_ptr = (coptarg != 0 ? atof (coptarg)
-                                                 : *(double *) cs->noarg_value);
+                    {
+                      *(double *) cs->value_ptr = (coptarg != 0 ? atof (coptarg)
+                                                   : *(double *) cs->noarg_value);
+                      if (cs->origin)
+                        *cs->origin = origin;
+                    }
 
                   break;
                 }
@@ -3301,9 +3360,9 @@ decode_switches (int argc, const char **argv, int env)
      to be returned in order, this only happens when there is a "--"
      argument to prevent later arguments from being options.  */
   while (optind < argc)
-    handle_non_switch_argument (argv[optind++], env);
+    handle_non_switch_argument (argv[optind++], origin);
 
-  if (bad && !env)
+  if (bad && origin == o_command)
     print_usage (bad);
 
   /* If there are any options that need to be decoded do it now.  */
@@ -3312,9 +3371,6 @@ decode_switches (int argc, const char **argv, int env)
 
   /* Perform any special switch handling.  */
   run_silent = silent_flag;
-
-  /* Construct the list of include directories to search.  */
-  construct_include_path (include_dirs ? include_dirs->list : NULL);
 }
 
 /* Decode switches from environment variable ENVAR (which is LEN chars long).
@@ -3322,8 +3378,8 @@ decode_switches (int argc, const char **argv, int env)
    dash to the first word if it lacks one, and passing the vector to
    decode_switches.  */
 
-void
-decode_env_switches (const char *envar, size_t len)
+static void
+decode_env_switches (const char *envar, size_t len, enum variable_origin origin)
 {
   char *varref = alloca (2 + len + 2);
   char *value, *p, *buf;
@@ -3385,7 +3441,7 @@ decode_env_switches (const char *envar, size_t len)
     argv[1] = buf;
 
   /* Parse those words.  */
-  decode_switches (argc, argv, 1);
+  decode_switches (argc, argv, origin);
 }
 
 /* Quote the string IN so that it will be interpreted as a single word with
@@ -3410,11 +3466,11 @@ quote_for_env (char *out, const char *in)
 }
 
 /* Define the MAKEFLAGS and MFLAGS variables to reflect the settings of the
-   command switches.  Include options with args if ALL is nonzero.
+   command switches. Always include options with args.
    Don't include options with the 'no_makefile' flag set if MAKEFILE.  */
 
-static struct variable *
-define_makeflags (int all, int makefile)
+struct variable *
+define_makeflags (int makefile)
 {
   const char ref[] = "MAKEOVERRIDES";
   const char posixref[] = "-*-command-variables-*-";
@@ -3470,7 +3526,7 @@ define_makeflags (int all, int makefile)
         case flag:
         case flag_off:
           if ((!*(int *) cs->value_ptr) == (cs->type == flag_off)
-              && (cs->default_value == 0
+              && (cs->default_value == NULL || cs->specified
                   || *(int *) cs->value_ptr != *(int *) cs->default_value))
             ADD_FLAG (0, 0);
           break;
@@ -3599,25 +3655,24 @@ define_makeflags (int all, int makefile)
       p = mempcpy (p, evalref, CSTRLEN (evalref));
     }
 
-  if (all)
-    {
-      /* If there are any overrides to add, write a reference to
-         $(MAKEOVERRIDES), which contains command-line variable definitions.
-         Separate the variables from the switches with a "--" arg.  */
+  {
+    /* If there are any overrides to add, write a reference to
+       $(MAKEOVERRIDES), which contains command-line variable definitions.
+       Separate the variables from the switches with a "--" arg.  */
 
-      const char *r = posix_pedantic ? posixref : ref;
-      size_t l = strlen (r);
-      v = lookup_variable (r, l);
+    const char *r = posix_pedantic ? posixref : ref;
+    size_t l = strlen (r);
+    v = lookup_variable (r, l);
 
-      if (v && v->value && v->value[0] != '\0')
-        {
-          p = stpcpy (p, " -- ");
-          *(p++) = '$';
-          *(p++) = '(';
-          p = mempcpy (p, r, l);
-          *(p++) = ')';
-        }
-    }
+    if (v && v->value && v->value[0] != '\0')
+      {
+        p = stpcpy (p, " -- ");
+        *(p++) = '$';
+        *(p++) = '(';
+        p = mempcpy (p, r, l);
+        *(p++) = ')';
+      }
+  }
 
   /* If there is a leading dash, omit it.  */
   if (flagstring[0] == '-')
@@ -3634,6 +3689,19 @@ define_makeflags (int all, int makefile)
   v->special = 1;
 
   return v;
+}
+
+/* Return 1 if the working directory change message should be printed.
+   Otherwise, return 0.  */
+int
+should_print_dir (void)
+{
+    if (print_directory_flag >= 0)
+        return print_directory_flag;
+
+    /* If the user didn't specify any print-directory options, compute the
+       default setting: disable under -s / print in sub-makes and under -C.  */
+    return !silent_flag && (makelevel > 0 || directories != NULL);
 }
 
 /* Print version information.  */
@@ -3662,7 +3730,7 @@ print_version (void)
      year, and none of the rest of it should be translated (including the
      word "Copyright"), so it hardly seems worth it.  */
 
-  printf ("%sCopyright (C) 1988-2022 Free Software Foundation, Inc.\n",
+  printf ("%sCopyright (C) 1988-2023 Free Software Foundation, Inc.\n",
           precede);
 
   printf (_("%sLicense GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>\n\

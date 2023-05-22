@@ -1,5 +1,5 @@
 /* Implicit rule searching for GNU Make.
-Copyright (C) 1988-2022 Free Software Foundation, Inc.
+Copyright (C) 1988-2023 Free Software Foundation, Inc.
 This file is part of GNU Make.
 
 GNU Make is free software; you can redistribute it and/or modify it under the
@@ -271,6 +271,8 @@ pattern_search (struct file *file, int archive,
   size_t pathlen;
 
   PATH_VAR (stem_str); /* @@ Need to get rid of stem, stemlen, etc. */
+
+  ++depth;
 
 #ifndef NO_ARCHIVES
   if (archive || ar_name (filename))
@@ -893,7 +895,7 @@ pattern_search (struct file *file, int archive,
 
                       if (pattern_search (int_file,
                                           0,
-                                          depth + 1,
+                                          depth,
                                           recursions + 1,
                                           allow_compat_rules))
                         {
@@ -1008,7 +1010,7 @@ pattern_search (struct file *file, int archive,
           f->also_make = imf->also_make;
           f->is_target = 1;
           f->is_explicit |= imf->is_explicit || pat->is_explicit;
-          f->notintermediate |= imf->notintermediate;
+          f->notintermediate |= imf->notintermediate || no_intermediates;
           f->intermediate |= !f->is_explicit && !f->notintermediate;
           f->tried_implicit = 1;
 
@@ -1090,7 +1092,7 @@ pattern_search (struct file *file, int archive,
       {
         if (f->precious)
           file->precious = 1;
-        if (f->notintermediate)
+        if (f->notintermediate || no_intermediates)
           file->notintermediate = 1;
       }
   }
@@ -1123,7 +1125,7 @@ pattern_search (struct file *file, int archive,
             {
               if (f->precious)
                 new->file->precious = 1;
-              if (f->notintermediate)
+              if (f->notintermediate || no_intermediates)
                 new->file->notintermediate = 1;
             }
 
@@ -1138,6 +1140,8 @@ pattern_search (struct file *file, int archive,
  done:
   free (tryrules);
   free (deplist);
+
+  --depth;
 
   if (rule)
     {

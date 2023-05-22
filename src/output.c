@@ -1,5 +1,5 @@
-/* Output to stdout / stderr for GNU make
-Copyright (C) 2013-2022 Free Software Foundation, Inc.
+/* Output to stdout / stderr for GNU Make
+Copyright (C) 2013-2023 Free Software Foundation, Inc.
 This file is part of GNU Make.
 
 GNU Make is free software; you can redistribute it and/or modify it under the
@@ -18,7 +18,7 @@ this program.  If not, see <https://www.gnu.org/licenses/>.  */
 #include "os.h"
 #include "output.h"
 
-/* GNU make no longer supports pre-ANSI89 environments.  */
+/* GNU Make no longer supports pre-ANSI89 environments.  */
 
 #include <assert.h>
 #include <stdio.h>
@@ -310,7 +310,8 @@ output_dump (struct output *out)
         }
 
       /* Log the working directory for this dump.  */
-      if (print_directory && output_sync != OUTPUT_SYNC_RECURSE)
+
+      if (output_sync != OUTPUT_SYNC_RECURSE && should_print_dir ())
         traced = log_working_directory (1);
 
       if (outfd_not_empty)
@@ -394,7 +395,7 @@ output_start (void)
   /* If we're not syncing this output per-line or per-target, make sure we emit
      the "Entering..." message where appropriate.  */
   if (output_sync == OUTPUT_SYNC_NONE || output_sync == OUTPUT_SYNC_RECURSE)
-    if (! stdio_traced && print_directory)
+    if (! stdio_traced && should_print_dir ())
       stdio_traced = log_working_directory (1);
 }
 

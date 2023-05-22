@@ -1,5 +1,5 @@
 /* Reading and parsing of makefiles for GNU Make.
-Copyright (C) 1988-2022 Free Software Foundation, Inc.
+Copyright (C) 1988-2023 Free Software Foundation, Inc.
 This file is part of GNU Make.
 
 GNU Make is free software; you can redistribute it and/or modify it under the
@@ -192,15 +192,7 @@ read_all_makefiles (const char **makefiles)
     char *name, *p;
     size_t length;
 
-    {
-      /* Turn off --warn-undefined-variables while we expand MAKEFILES.  */
-      int save = warn_undefined_variables_flag;
-      warn_undefined_variables_flag = 0;
-
-      value = allocated_variable_expand ("$(MAKEFILES)");
-
-      warn_undefined_variables_flag = save;
-    }
+    value = allocated_variable_expand ("$(MAKEFILES)");
 
     /* Set NAME to the start of next token and LENGTH to its length.
        MAKEFILES is updated for finding remaining tokens.  */
@@ -373,8 +365,9 @@ eval_makefile (const char *filename, unsigned short flags)
   /* If the makefile wasn't found and it's either a makefile from the
      'MAKEFILES' variable or an included makefile, search the included
      makefile search path for this makefile.  */
-  if (ebuf.fp == NULL && deps->error == ENOENT && (flags & RM_INCLUDED)
-      && *filename != '/' && include_directories)
+  if (ebuf.fp == NULL && deps->error == ENOENT && include_directories
+      && ANY_SET (flags, RM_INCLUDED)
+      && !HAS_DRIVESPEC (filename) && !ISDIRSEP (*filename))
     {
       const char **dir;
       for (dir = include_directories; *dir != NULL; ++dir)
@@ -403,6 +396,7 @@ eval_makefile (const char *filename, unsigned short flags)
     deps->file = enter_file (filename);
   filename = deps->file->name;
   deps->flags = flags;
+  deps->file->is_explicit = 1;
 
   free (expanded);
 

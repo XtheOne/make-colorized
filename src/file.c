@@ -1,5 +1,5 @@
 /* Target file management for GNU Make.
-Copyright (C) 1988-2022 Free Software Foundation, Inc.
+Copyright (C) 1988-2023 Free Software Foundation, Inc.
 This file is part of GNU Make.
 
 GNU Make is free software; you can redistribute it and/or modify it under the
@@ -62,9 +62,6 @@ static struct hash_table files;
 
 /* Whether or not .SECONDARY with no prerequisites was given.  */
 static int all_secondary = 0;
-
-/* Whether or not .NOTINTERMEDIATE with no prerequisites was given.  */
-static int no_intermediates = 0;
 
 /* Access the hash table of all file records.
    lookup_file  given a name, return the struct file * for that name,
@@ -368,7 +365,7 @@ remove_intermediates (int sig)
   int doneany = 0;
 
   /* If there's no way we will ever remove anything anyway, punt early.  */
-  if (question_flag || touch_flag || all_secondary)
+  if (question_flag || touch_flag || all_secondary || no_intermediates)
     return;
 
   if (sig && just_print_flag)
@@ -731,7 +728,7 @@ snap_file (const void *item, void *arg)
   /* If .NOTINTERMEDIATE is set with no deps, mark all targets as
      notintermediate, unless the target is a prereq of .INTERMEDIATE.  */
   if (no_intermediates && !f->intermediate && !f->secondary)
-      f->notintermediate = 1;
+    f->notintermediate = 1;
 
   /* If .EXTRA_PREREQS is set, add them as ignored by automatic variables.  */
   if (f->variables)
@@ -810,7 +807,7 @@ snap_deps (void)
     else
       no_intermediates = 1;
 
-  /* The same file connot be both .INTERMEDIATE and .NOTINTERMEDIATE.
+  /* The same file cannot be both .INTERMEDIATE and .NOTINTERMEDIATE.
      However, it is possible for a file to be .INTERMEDIATE and also match a
      .NOTINTERMEDIATE pattern.  In that case, the intermediate file has
      priority over the notintermediate pattern.  This priority is enforced by
