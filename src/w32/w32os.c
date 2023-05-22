@@ -45,6 +45,15 @@ check_io_state ()
   HANDLE outfd = (HANDLE)_get_osfhandle (fileno (stdout));
   HANDLE errfd = (HANDLE)_get_osfhandle (fileno (stderr));
 
+  /* Enable processing of ANSI color control sequences.  */
+  DWORD dwMode = 0;
+  GetConsoleMode(outfd, &dwMode);
+  dwMode |= ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+  SetConsoleMode(outfd, dwMode);
+  GetConsoleMode(errfd, &dwMode);
+  dwMode |= ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+  SetConsoleMode(errfd, dwMode);
+
   if ((HANDLE)_get_osfhandle (fileno (stdin)) != INVALID_HANDLE_VALUE)
     state |= IO_STDIN_OK;
   if (outfd != INVALID_HANDLE_VALUE)
