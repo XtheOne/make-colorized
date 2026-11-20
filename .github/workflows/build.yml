@@ -1,0 +1,68 @@
+name: Build and test
+
+on:
+  push:
+    branches: [colorized]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  posix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autoconf automake autopoint gettext texinfo pkg-config
+          echo "GMAKE=make" >> "$GITHUB_ENV"
+
+      - name: Install build tools (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install autoconf automake gettext texinfo pkg-config make
+          echo "$(brew --prefix texinfo)/bin" >> "$GITHUB_PATH"
+          echo "GMAKE=gmake" >> "$GITHUB_ENV"
+
+      # savannah.gnu.org is not always reachable from CI; use the GitHub
+      # mirror at the revision bootstrap.conf asks for.
+      - name: Get gnulib
+        run: |
+          rev=$(sed -n 's/^GNULIB_REVISION=//p' bootstrap.conf)
+          git clone --depth 1 --branch "$rev" https://github.com/coreutils/gnulib.git "$RUNNER_TEMP/gnulib"
+
+      - name: Bootstrap
+        run: ./bootstrap --skip-po
+        env:
+          GNULIB_SRCDIR: ${{ runner.temp }}/gnulib
+
+      - name: Configure
+        run: ./configure
+
+      - name: Check that output streaming is enabled
+        run: grep -E '^#define HAVE_PTHREAD_CREATE 1' src/config.h
+
+      - name: Build
+        run: $GMAKE -j4
+
+      - name: Test suite
+        run: $GMAKE check
+
+      - name: Color and streaming smoke test
+        run: sh ./scripts/color-smoke-test.sh ./make
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: |
+            tests/work/
+            tests/*.log
+          if-no-files-found: ignore
