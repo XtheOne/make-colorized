@@ -897,6 +897,12 @@ reap_children (int block, int err)
 
     process_child:
 
+#if MK_OS_W32
+      /* Show the rest of the child's output before reporting on it.  */
+      output_stream_close (&c->stream_out);
+      output_stream_close (&c->stream_err);
+#endif
+
 #if defined(USE_POSIX_SPAWN)
       /* Some versions of posix_spawn() do not detect errors such as command
          not found until after they fork.  In that case they will exit with a
@@ -1107,6 +1113,10 @@ free_childbase (struct childbase *child)
 static void
 free_child (struct child *child)
 {
+#if MK_OS_W32
+  output_stream_close (&child->stream_out);
+  output_stream_close (&child->stream_err);
+#endif
   output_close (&child->output);
 
   if (!jobserver_tokens)
@@ -1540,14 +1550,40 @@ start_job_command (struct child *child)
           if (child->output.err >= 0)
             errfd = child->output.err;
         }
+      /* Otherwise stream it through a pipe to color it while it runs.
+         Recursive makes color their own output.  */
+      else if (NONE_SET (flags, COMMANDS_RECURSE))
+        {
+          unsigned int io_state = check_io_state ();
+
+          if (ANY_SET (io_state, IO_STDOUT_OK))
+            child->stream_out = output_stream_open (0, &outfd);
+          if (ANY_SET (io_state, IO_STDERR_OK))
+            {
+              /* One pipe for both keeps their lines in order.  */
+              if (child->stream_out && ANY_SET (io_state, IO_COMBINED_OUTERR))
+                errfd = outfd;
+              else
+                child->stream_err = output_stream_open (1, &errfd);
+            }
+        }
 
       hPID = process_easy (argv, child->environment, outfd, errfd);
+
+      /* The child has its own copies of the pipe write ends; the reader
+         sees the end of the output once the child closes them.  */
+      if (child->stream_out)
+        close (outfd);
+      if (child->stream_err)
+        close (errfd);
 
       if (hPID != INVALID_HANDLE_VALUE)
         child->pid = (pid_t) hPID;
       else
         {
           int i;
+          output_stream_close (&child->stream_out);
+          output_stream_close (&child->stream_err);
           unblock_sigs ();
           fprintf (stderr,
                    _("process_easy() failed to launch process (e=%ld)\n"),

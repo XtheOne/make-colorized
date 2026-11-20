@@ -37,6 +37,7 @@ this program.  If not, see <https://www.gnu.org/licenses/>.  */
 #if MK_OS_W32
 # include <windows.h>
 # include <io.h>
+# include <process.h>
 # include "sub_proc.h"
 #endif
 
@@ -143,16 +144,253 @@ log_working_directory (int entering)
 }
 
 
+/* Return a new buffer with the child output BUF[0..*LEN) in which " error "
+   and " warning " are colored, and set *LEN to its length.  The trailing
+   space of a match is not consumed, so "x error error y" colors both words.
+   The worst case is a 6 byte step growing to 15 bytes, hence 3 * LEN.  */
+static char *
+colorize (const char *buf, size_t *len)
+{
+  static const char err_find[] = " error ";
+  static const char err_repl[] = " \33[91merror\33[0m";
+  static const char warn_find[] = " warning ";
+  static const char warn_repl[] = " \33[95mwarning\33[0m";
+  size_t in_len = *len;
+  char *result = xmalloc (in_len * 3 + 1);
+  char *p = result;
+  size_t i = 0;
+
+  while (i < in_len)
+    {
+      size_t rest = in_len - i;
+      if (buf[i] == ' ' && rest >= sizeof (err_find) - 1
+          && memcmp (buf + i, err_find, sizeof (err_find) - 1) == 0)
+        {
+          memcpy (p, err_repl, sizeof (err_repl) - 1);
+          p += sizeof (err_repl) - 1;
+          i += sizeof (err_find) - 2;
+        }
+      else if (buf[i] == ' ' && rest >= sizeof (warn_find) - 1
+               && memcmp (buf + i, warn_find, sizeof (warn_find) - 1) == 0)
+        {
+          memcpy (p, warn_repl, sizeof (warn_repl) - 1);
+          p += sizeof (warn_repl) - 1;
+          i += sizeof (warn_find) - 2;
+        }
+      else
+        *p++ = buf[i++];
+    }
+
+  *len = p - result;
+  return result;
+}
+
+#if MK_OS_W32
+
+/* Child output streamed through a pipe.  A reader thread colors each
+   complete line and writes it to make's stdout or stderr at once, so the
+   output shows while the command runs instead of after it has finished.  */
+struct output_stream
+  {
+    HANDLE read;              /* Read end of the pipe.  */
+    HANDLE target;            /* Make's stdout or stderr.  */
+    HANDLE thread;
+    volatile LONG stop;       /* Set once the child has exited.  */
+  };
+
+/* Writes from parallel reader threads must not mix within a line.  */
+static CRITICAL_SECTION stream_lock;
+
+/* After the child has exited, a background process it started can keep the
+   pipe open.  Stop reading once it has been quiet this long.  */
+#define STREAM_GRACE_MS   200
+
+/* A partial line (a prompt, a progress dot) is written after this long
+   without new data.  */
+#define STREAM_PARTIAL_MS 100
+
+#define STREAM_POLL_MS    10
+
+static void
+stream_write (struct output_stream *s, const char *buf, size_t len)
+{
+  char *colored = colorize (buf, &len);
+  const char *p = colored;
+
+  EnterCriticalSection (&stream_lock);
+  while (len > 0)
+    {
+      DWORD written;
+      if (!WriteFile (s->target, p, (DWORD) len, &written, NULL)
+          || written == 0)
+        break;
+      p += written;
+      len -= written;
+    }
+  LeaveCriticalSection (&stream_lock);
+
+  free (colored);
+}
+
+/* Reading polls with PeekNamedPipe instead of blocking in ReadFile, so the
+   thread can stop when a background process holds the pipe open.  */
+static unsigned __stdcall
+stream_reader (void *arg)
+{
+  struct output_stream *s = arg;
+  char *buf = NULL;
+  size_t size = 0;
+  size_t used = 0;
+  DWORD last_data = GetTickCount ();
+  DWORD stop_seen = 0;
+  int stopping = 0;
+
+  while (1)
+    {
+      DWORD avail = 0;
+      DWORD got = 0;
+      DWORD now;
+      size_t end;
+
+      /* This fails with ERROR_BROKEN_PIPE once the pipe is drained and
+         every writer has closed it.  */
+      if (!PeekNamedPipe (s->read, NULL, 0, NULL, &avail, NULL))
+        break;
+
+      now = GetTickCount ();
+      if (!stopping && s->stop)
+        {
+          stopping = 1;
+          stop_seen = now;
+        }
+
+      if (avail == 0)
+        {
+          if (used > 0 && now - last_data >= STREAM_PARTIAL_MS)
+            {
+              stream_write (s, buf, used);
+              used = 0;
+            }
+          if (stopping && now - stop_seen >= STREAM_GRACE_MS
+              && now - last_data >= STREAM_GRACE_MS)
+            break;
+          Sleep (STREAM_POLL_MS);
+          continue;
+        }
+
+      if (used + avail > size)
+        {
+          size = used + avail;
+          buf = xrealloc (buf, size);
+        }
+      if (!ReadFile (s->read, buf + used, avail, &got, NULL))
+        break;
+      used += got;
+      last_data = GetTickCount ();
+
+      /* Write every complete line, keep the rest for the next read.  */
+      end = used;
+      while (end > 0 && buf[end - 1] != '\n')
+        --end;
+      if (end > 0)
+        {
+          stream_write (s, buf, end);
+          memmove (buf, buf + end, used - end);
+          used -= end;
+        }
+    }
+
+  if (used > 0)
+    stream_write (s, buf, used);
+  free (buf);
+  return 0;
+}
+
+/* Start streaming a child's stdout (IS_ERR == 0) or stderr.  On success
+   *FD is the write end of the pipe to hand to the child; the caller closes
+   it after starting the child.  Returns NULL if the pipe cannot be set up,
+   the child then writes to make's own handle.  */
+struct output_stream *
+output_stream_open (int is_err, int *fd)
+{
+  static int lock_ready = 0;
+  struct output_stream *s;
+  HANDLE r, w;
+
+  *fd = -1;
+
+  if (!lock_ready)
+    {
+      InitializeCriticalSection (&stream_lock);
+      lock_ready = 1;
+    }
+
+  /* Not inheritable: process_easy() makes an inheritable copy for this
+     child only, so other children started in parallel do not hold the pipe
+     open.  */
+  if (!CreatePipe (&r, &w, NULL, 64 * 1024))
+    return NULL;
+
+  *fd = _open_osfhandle ((intptr_t) w, _O_BINARY);
+  if (*fd < 0)
+    {
+      CloseHandle (r);
+      CloseHandle (w);
+      return NULL;
+    }
+
+  s = xcalloc (sizeof (struct output_stream));
+  s->read = r;
+  s->target = get_handle_for_fd (fileno (is_err ? stderr : stdout));
+  s->thread = (HANDLE) _beginthreadex (NULL, 0, stream_reader, s, 0, NULL);
+  if (!s->thread)
+    {
+      close (*fd);
+      *fd = -1;
+      CloseHandle (r);
+      free (s);
+      return NULL;
+    }
+
+  return s;
+}
+
+/* Wait until all output of the stream has been written, then free it.
+   Call after the child has exited and before make reports on it.  */
+void
+output_stream_close (struct output_stream **ps)
+{
+  struct output_stream *s = *ps;
+
+  if (!s)
+    return;
+  *ps = NULL;
+
+  /* Make's own messages printed before this point must not end up after
+     the child's output in the CRT buffers.  */
+  fflush (stdout);
+  fflush (stderr);
+
+  InterlockedExchange (&s->stop, 1);
+  WaitForSingleObject (s->thread, INFINITE);
+  CloseHandle (s->thread);
+  CloseHandle (s->read);
+  free (s);
+}
+
+#endif /* MK_OS_W32 */
+
+
 #ifndef NO_OUTPUT_SYNC
 
 /* Support routine for output_sync() */
 static void
 pump_from_tmp (int from, FILE *to)
 {
-  int len;
-  int len_add;
   long pos;
-  char* buffer;
+  size_t len = 0;
+  char *buffer;
+  char *colored;
 
 #if MK_OS_W32
   int prev_mode;
@@ -162,46 +400,35 @@ pump_from_tmp (int from, FILE *to)
   prev_mode = _setmode (fileno (to), _O_BINARY);
 #endif
 
-  pos = lseek(from, 0, SEEK_END);
-  if (pos == -1L)
-    O (error, NILF, "lseek() to end failed");
-  
-  buffer = (char*) malloc(pos * 2);
-
-  if (lseek (from, 0, SEEK_SET) == -1)
-    O (error, NILF, "lseek() to beginning failed");
-
-  while (1)
-  {
-    EINTRLOOP (len, read (from, buffer, pos));
-    if (len < 0)
-      O (error, NILF, "read() failed");
-    if (len <= 0)
-      break;
-    buffer[len+1] = 0;
-
-    if (replace_string(buffer, &len, " error ", " \33[91merror\33[0m "))
-      O (error, NILF, "Buffer overflow adding error");
-
-    if (replace_string(buffer, &len, " warning ", " \33[95mwarning\33[0m "))
-      O (error, NILF, "Buffer overflow adding warning");
-
-    if (len > pos * 2)
+  pos = lseek (from, 0, SEEK_END);
+  if (pos < 0 || lseek (from, 0, SEEK_SET) == -1)
     {
-      O (error, NILF, "Buffer overflow");
-      len = pos * 2;
-      buffer[len] = 0;
+      perror ("lseek()");
+      pos = 0;
     }
 
-    if (fwrite (buffer, len, 1, to) < 1)
+  buffer = xmalloc (pos + 1);
+  while (len < (size_t) pos)
     {
-      O (error, NILF, "fwrite() failed");
-      break;
+      int r;
+      EINTRLOOP (r, read (from, buffer + len, (unsigned int) (pos - len)));
+      if (r < 0)
+        perror ("read()");
+      if (r <= 0)
+        break;
+      len += r;
     }
-    fflush (to);
-  }
 
-  free(buffer);
+  if (len > 0)
+    {
+      colored = colorize (buffer, &len);
+      if (fwrite (colored, len, 1, to) < 1)
+        perror ("fwrite()");
+      fflush (to);
+      free (colored);
+    }
+
+  free (buffer);
 
 #if MK_OS_W32
   /* Switch "to" back to its original mode, so that log messages by
@@ -619,35 +846,5 @@ out_of_memory ()
   writebuf (FD_STDOUT, program, strlen (program));
   writebuf (FD_STDOUT, STRING_SIZE_TUPLE (": *** virtual memory exhausted\n"));
   exit (MAKE_FAILURE);
-}
-
-int replace_string(char* str, int *len, char* find, char* replace_str)
-{
-  int len_find = strlen(find), len_replace = strlen(replace_str);
-  int len_move = 0;
-  if (len_find != len_replace)
-  {
-    int len_inc = (len_replace - len_find);
-    for (char* ptr = str; ptr = strstr(ptr, find); ++ptr)
-	{
-      len_move = (*len - (ptr - str) + len_inc);
-      if (len_move > 0)
-        memmove(ptr+len_replace, ptr+len_find, len_move);
-      else
-        return 1;
-      memcpy(ptr, replace_str, len_replace);
-	  *len += len_inc;
-    }
-    return 0;
-  }
-  else
-  {
-    for (char* ptr = str; ptr = strstr(ptr, find); ++ptr)
-	{
-      memcpy(ptr, replace_str, len_replace);
-    }
-    return 0;
-  }
-  return 0;
 }
     

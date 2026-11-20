@@ -55,6 +55,12 @@ void outputs (int is_err, const char *msg);
 #else
 /* Dump any child output content to stdout, and reset it.  */
 void output_dump (struct output *out);
-int replace_string(char*, int*, char*, char*);
 
+#endif
+
+#if MK_OS_W32
+/* Stream a child's output through a pipe, colored line by line.  */
+struct output_stream;
+struct output_stream *output_stream_open (int is_err, int *fd);
+void output_stream_close (struct output_stream **stream);
 #endif

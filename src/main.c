@@ -596,9 +596,8 @@ int one_shell;
 /* One of OUTPUT_SYNC_* if the "--output-sync" option was given.  This
    attempts to synchronize the output of parallel jobs such that the results
    of each job stay together.  */
-/* default to line sync for coloring */
 
-int output_sync = OUTPUT_SYNC_LINE;
+int output_sync = OUTPUT_SYNC_NONE;
 
 /* Nonzero if we have seen the '.NOTPARALLEL' target.
    This turns off parallel builds for this invocation of make.  */
@@ -2205,15 +2204,14 @@ main (int argc, char **argv, char **envp)
   /* If we're not using parallel jobs, then we don't need output sync.
      This is so people can enable output sync in GNUMAKEFLAGS or similar, but
      not have it take effect unless parallel builds are enabled.  */
-  /* Disabled for coloring */
-//  if (syncing && job_slots == 1)
-//    {
-//      OUTPUT_UNSET ();
-//      output_close (&make_sync);
-//      syncing = 0;
-//      output_sync = OUTPUT_SYNC_NONE;
-//    }
- 
+  if (syncing && job_slots == 1)
+    {
+      OUTPUT_UNSET ();
+      output_close (&make_sync);
+      syncing = 0;
+      output_sync = OUTPUT_SYNC_NONE;
+    }
+
   if (syncing)
     {
       /* If there is no mutex we're the base: create one.  Else parse it.  */

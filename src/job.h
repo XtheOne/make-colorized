@@ -63,6 +63,10 @@ struct child
     unsigned int  recursive:1;  /* Nonzero for recursive command ('+' etc.)  */
     unsigned int  jobslot:1;    /* Nonzero if it's reserved a job slot.  */
     unsigned int  dontcare:1;   /* Saved dontcare flag.  */
+#if MK_OS_W32
+    struct output_stream *stream_out; /* Colored stdout, if not synced.  */
+    struct output_stream *stream_err; /* Colored stderr, if separate.  */
+#endif
   };
 
 extern struct child *children;
