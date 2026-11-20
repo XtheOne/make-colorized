@@ -12,6 +12,16 @@
           "message": 5
         }
       ]
+    },
+    {
+      "owner": "build-error",
+      "severity": "error",
+      "pattern": [
+        {
+          "regexp": "^(.*(?:undefined reference to|ld returned|ld: |cannot find|No such file or directory|No rule to make target|makeinfo:|\\*\\*\\* \\[.*\\] Error \\d+).*)$",
+          "message": 1
+        }
+      ]
     }
   ]
 }

@@ -49,8 +49,9 @@ jobs:
         env:
           GNULIB_SRCDIR: ${{ runner.temp }}/gnulib
 
+      # Bootstrap skips the translations, so build without them.
       - name: Configure
-        run: ./configure
+        run: ./configure --disable-nls
 
       - name: Check that output streaming is enabled
         run: grep -E '^#define HAVE_PTHREAD_CREATE 1' src/config.h
