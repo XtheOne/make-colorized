@@ -71,6 +71,16 @@ jobs:
       - name: Color and streaming smoke test
         run: sh ./scripts/color-smoke-test.sh ./make
 
+      # Job logs and artifacts need repository access; annotations do not.
+      - name: Show failed tests
+        if: failure()
+        run: |
+          [ -d tests/work ] || exit 0
+          find tests/work -name '*.diff*' | sort | while read -r f; do
+            body=$(head -c 2000 "$f" | perl -0pe 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g')
+            echo "::error title=${f#tests/work/}::$body"
+          done
+
       - name: Upload test results
         if: failure()
         uses: actions/upload-artifact@v4
