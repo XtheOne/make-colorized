@@ -65,8 +65,16 @@ jobs:
         if: runner.os == 'macOS'
         run: $GMAKE -j4 MAKE_CFLAGS="$CLANG_CFLAGS"
 
+      # features/archives expects GNU ar and ranlib; Apple's print other
+      # messages and keep member timestamps differently.
       - name: Test suite
-        run: $GMAKE check ${CLANG_CFLAGS:+"MAKE_CFLAGS=$CLANG_CFLAGS"}
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            tests=$(cd tests/scripts && git ls-files | grep -v '^features/archives$' | tr '\n' ' ')
+            $GMAKE check "MAKE_CFLAGS=$CLANG_CFLAGS" MAKETESTFLAGS="$tests"
+          else
+            $GMAKE check
+          fi
 
       - name: Color and streaming smoke test
         run: sh ./scripts/color-smoke-test.sh ./make
