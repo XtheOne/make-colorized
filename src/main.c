@@ -158,6 +158,10 @@ int db_level = 0;
 
 char *output_sync_option = 0;
 
+/* Color errors and warnings (--color).  */
+
+static char *color_option = 0;
+
 /* Environment variables override makefile definitions.  */
 
 int env_overrides = 0;
@@ -337,6 +341,9 @@ static const char *const usage[] =
   -C DIRECTORY, --directory=DIRECTORY\n\
                               Change to DIRECTORY before doing anything.\n"),
     N_("\
+  --color[=WHEN]              Color errors and warnings: WHEN is auto,\n\
+                              always or never.\n"),
+    N_("\
   -d                          Print lots of debugging information.\n"),
     N_("\
   --debug[=FLAGS]             Print various types of debugging information.\n"),
@@ -515,6 +522,7 @@ static struct command_switch switches[] =
     { CHAR_MAX+12, string, &jobserver_style, 1, 0, 0, 0, 0, 0, "jobserver-style", 0 },
     { WARN_OPT, strlist, &warn_flags, 1, 1, 0, 0, "warn", NULL, "warn", NULL },
     { CHAR_MAX+14, flag, &print_targets_flag, 1, 1, 0, 0, 0, 0, "print-targets", 0 },
+    { CHAR_MAX+15, string, &color_option, 1, 1, 0, 0, "always", 0, "color", 0 },
     { 0, 0, NULL, 0, 0, 0, 0, NULL, NULL, NULL, NULL }
   };
 
@@ -899,6 +907,12 @@ decode_output_sync_flags (void)
   if (sync_mutex)
     osync_parse_mutex (sync_mutex);
 #endif
+}
+
+static void
+decode_color_flags (void)
+{
+  output_color_setup (color_option);
 }
 
 /* Print a nice usage method and exit.  */
@@ -3369,6 +3383,7 @@ decode_switches (int argc, const char **argv, enum variable_origin origin)
   /* If there are any options that need to be decoded do it now.  */
   decode_debug_flags ();
   decode_output_sync_flags ();
+  decode_color_flags ();
 
   /* Support old-style option.  */
   if (warn_undefined_variables_flag)

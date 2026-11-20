@@ -70,6 +70,15 @@ AC_CHECK_HEADERS([stdlib.h string.h strings.h locale.h unistd.h limits.h \
                   memory.h sys/param.h sys/resource.h sys/time.h sys/select.h \
                   sys/file.h fcntl.h spawn.h])
 
+# Coloring child output while it runs uses a reader thread per job.
+AC_CHECK_HEADERS([pthread.h poll.h])
+AS_IF([test "$ac_cv_header_pthread_h" = yes],
+[ AC_SEARCH_LIBS([pthread_create], [pthread],
+  [ AC_DEFINE([HAVE_PTHREAD_CREATE], [1],
+              [Define to 1 if you have the pthread_create function.])
+  ])
+])
+
 AM_PROG_CC_C_O
 AC_C_CONST
 AC_TYPE_UID_T

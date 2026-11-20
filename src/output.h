@@ -14,12 +14,25 @@ A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License along with
 this program.  If not, see <https://www.gnu.org/licenses/>.  */
 
+struct output_stream;
+
 struct output
   {
     int out;
     int err;
+    struct output_stream *stream_out; /* Colored stdout while a child runs.  */
+    struct output_stream *stream_err; /* Colored stderr, if separate.  */
     unsigned int syncout:1;     /* True if we want to synchronize output.  */
  };
+
+/* Nonzero if make colors errors and warnings written to stdout / stderr.  */
+extern int output_color_out;
+extern int output_color_err;
+
+/* Decide on colors for --color=WHEN: "auto" (also for NULL), "always" or
+   "never".  "auto" colors a stream only if it is a terminal and neither
+   NO_COLOR nor TERM=dumb is set.  */
+void output_color_setup (const char *when);
 
 extern struct output *output_context;
 extern unsigned int stdio_traced;
@@ -58,9 +71,31 @@ void output_dump (struct output *out);
 
 #endif
 
-#if MK_OS_W32
-/* Stream a child's output through a pipe, colored line by line.  */
-struct output_stream;
-struct output_stream *output_stream_open (int is_err, int *fd);
-void output_stream_close (struct output_stream **stream);
+/* Streaming a child's output through a pipe, colored line by line while the
+   child runs, needs a reader thread.  Without it colors only reach child
+   output that --output-sync collects.  */
+#if MK_OS_W32 \
+    || (defined(HAVE_PTHREAD_CREATE) && defined(HAVE_PTHREAD_H) \
+        && defined(HAVE_POLL_H) && !MK_OS_OS2 && !MK_OS_VMS && !MK_OS_DOS)
+# define HAVE_OUTPUT_STREAMS 1
+
+/* Set up streams for a child that is about to start, if colors are on and
+   its output is not synchronized.  */
+void output_streams_open (struct output *out);
+
+/* Replace *OUTFD and *ERRFD with the pipe ends the child must write to, if
+   it has streams.  */
+void output_stream_fds (const struct output *out, int *outfd, int *errfd);
+
+/* Close make's copies of the pipe ends once the child has started.  */
+void output_streams_started (struct output *out);
+
+/* Wait until all output of the child has been written, then free its
+   streams.  Call after the child has exited and before reporting on it.  */
+void output_streams_close (struct output *out);
+#else
+# define output_streams_open(_o)        (void)(0)
+# define output_stream_fds(_o,_of,_ef)  (void)(0)
+# define output_streams_started(_o)     (void)(0)
+# define output_streams_close(_o)       (void)(0)
 #endif

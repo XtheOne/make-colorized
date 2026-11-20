@@ -112,6 +112,34 @@ is equivalent to
 This is typically used with recursive invocations of
 .BR make .
 .TP 0.5i
+\fB\-\-color\fR[=\fIwhen\fR]
+Color errors and warnings in the output of
+.B make
+and in the output of recipes, where the words "error" and "warning" are
+highlighted.
+.I when
+is
+.BR auto ,
+.B always
+or
+.BR never .
+.B \-\-color
+without
+.I when
+means
+.BR always .
+The default,
+.BR auto ,
+uses colors only when the output goes to a terminal and the environment
+variable
+.B NO_COLOR
+is not set and
+.B TERM
+is not
+.BR dumb .
+While colors are on, recipe output is passed through a pipe and shown line
+by line as the recipe runs.
+.TP 0.5i
 .B \-d
 Print debugging information in addition to normal processing.
 The debugging information says which files are being considered for
