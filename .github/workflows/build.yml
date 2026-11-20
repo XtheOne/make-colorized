@@ -16,6 +16,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Show compiler errors and warnings as annotations on the run.
+      - name: Register compiler problem matcher
+        run: echo "::add-matcher::.github/problem-matchers/compiler.json"
+
       - name: Install build tools (Ubuntu)
         if: runner.os == 'Linux'
         run: |
@@ -23,12 +27,15 @@ jobs:
           sudo apt-get install -y autoconf automake autopoint gettext texinfo pkg-config
           echo "GMAKE=make" >> "$GITHUB_ENV"
 
+      # maintMakefile's MAKE_CFLAGS has GCC-only warnings that clang rejects
+      # under -Werror; keep the rest of the strict set.
       - name: Install build tools (macOS)
         if: runner.os == 'macOS'
         run: |
           brew install autoconf automake gettext texinfo pkg-config make
           echo "$(brew --prefix texinfo)/bin" >> "$GITHUB_PATH"
           echo "GMAKE=gmake" >> "$GITHUB_ENV"
+          echo "CLANG_CFLAGS=-Wall -Wextra -Werror -Wwrite-strings -Wshadow -Wdeclaration-after-statement -Wbad-function-cast -Wformat-security -Wtype-limits -Wpointer-arith -Wignored-qualifiers" >> "$GITHUB_ENV"
 
       # savannah.gnu.org is not always reachable from CI; use the GitHub
       # mirror at the revision bootstrap.conf asks for.
@@ -48,11 +55,16 @@ jobs:
       - name: Check that output streaming is enabled
         run: grep -E '^#define HAVE_PTHREAD_CREATE 1' src/config.h
 
-      - name: Build
+      - name: Build (GCC)
+        if: runner.os == 'Linux'
         run: $GMAKE -j4
 
+      - name: Build (clang)
+        if: runner.os == 'macOS'
+        run: $GMAKE -j4 MAKE_CFLAGS="$CLANG_CFLAGS"
+
       - name: Test suite
-        run: $GMAKE check
+        run: $GMAKE check ${CLANG_CFLAGS:+"MAKE_CFLAGS=$CLANG_CFLAGS"}
 
       - name: Color and streaming smoke test
         run: sh ./scripts/color-smoke-test.sh ./make

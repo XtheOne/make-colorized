@@ -989,7 +989,7 @@ describe_member (int desc, const char *name, int truncated,
                  intmax_t date, int uid, int gid, unsigned int mode,
                  const void *arg)
 {
-  extern char *ctime ();
+  extern char *ctime (const time_t *);
   time_t d = date;
   char const *ds;
 
