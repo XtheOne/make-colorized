@@ -1,5 +1,5 @@
 /* Command processing for GNU Make.
-Copyright (C) 1988-2023 Free Software Foundation, Inc.
+Copyright (C) 1988-2024 Free Software Foundation, Inc.
 This file is part of GNU Make.
 
 GNU Make is free software; you can redistribute it and/or modify it under the
@@ -21,12 +21,12 @@ this program.  If not, see <https://www.gnu.org/licenses/>.  */
 #include "variable.h"
 #include "job.h"
 #include "commands.h"
-#ifdef WINDOWS32
+#if MK_OS_W32
 #include <windows.h>
 #include "w32err.h"
 #endif
 
-#if VMS
+#if MK_OS_VMS
 # define FILE_LIST_SEPARATOR (vms_comma_separator ? ',' : ' ')
 #else
 # define FILE_LIST_SEPARATOR ' '
@@ -313,7 +313,7 @@ set_file_variables (struct file *file, const char *stem)
     DEFINE_VARIABLE ("|", 1, bar_value);
   }
 
-#undef  DEFINE_VARIABLE
+#undef DEFINE_VARIABLE
 }
 
 /* Chop CMDS up into individual command lines if necessary.
@@ -376,7 +376,7 @@ chop_commands (struct commands *cmds)
 
           if (nlines == USHRT_MAX)
             ON (fatal, &cmds->fileinfo,
-                _("Recipe has too many lines (limit %hu)"), nlines);
+                _("recipe has too many lines (limit %hu)"), nlines);
 
           if (nlines == max)
             {
@@ -483,7 +483,7 @@ volatile sig_atomic_t handling_fatal_signal = 0;
 void
 fatal_error_signal (int sig)
 {
-#ifdef __MSDOS__
+#if MK_OS_DOS
   extern int dos_status, dos_command_running;
 
   if (dos_command_running)
@@ -494,15 +494,8 @@ fatal_error_signal (int sig)
     }
   remove_intermediates (1);
   exit (EXIT_FAILURE);
-#else /* not __MSDOS__ */
-#ifdef _AMIGA
-  remove_intermediates (1);
-  if (sig == SIGINT)
-     fputs (_("*** Break.\n"), stderr);
-
-  exit (10);
-#else /* not Amiga */
-#ifdef WINDOWS32
+#else /* not MK_OS_DOS */
+#if MK_OS_W32
   extern HANDLE main_thread;
 
   /* Windows creates a separate thread for handling Ctrl+C, so we need
@@ -588,7 +581,7 @@ fatal_error_signal (int sig)
     exit (MAKE_TROUBLE);
 #endif
 
-#ifdef WINDOWS32
+#if MK_OS_W32
   if (main_thread)
     CloseHandle (main_thread);
   /* Cannot call W32_kill with a pid (it needs a handle).  The exit
@@ -599,9 +592,8 @@ fatal_error_signal (int sig)
      will be unblocked when we return and arrive then to kill us.  */
   if (kill (make_pid (), sig) < 0)
     pfatal_with_name ("kill");
-#endif /* not WINDOWS32 */
-#endif /* not Amiga */
-#endif /* not __MSDOS__  */
+#endif /* not MK_OS_W32 */
+#endif /* not MK_OS_DOS  */
 }
 
 /* Delete FILE unless it's precious or not actually a file (phony),
@@ -626,11 +618,11 @@ delete_target (struct file *file, const char *on_behalf_of)
         {
           if (on_behalf_of)
             OSS (error, NILF,
-                 _("*** [%s] Archive member '%s' may be bogus; not deleted"),
+                 _("*** [%s] archive member '%s' may be bogus; not deleted"),
                  on_behalf_of, file->name);
           else
             OS (error, NILF,
-                _("*** Archive member '%s' may be bogus; not deleted"),
+                _("*** archive member '%s' may be bogus; not deleted"),
                 file->name);
         }
       return;
@@ -644,9 +636,9 @@ delete_target (struct file *file, const char *on_behalf_of)
     {
       if (on_behalf_of)
         OSS (error, NILF,
-             _("*** [%s] Deleting file '%s'"), on_behalf_of, file->name);
+             _("*** [%s] deleting file '%s'"), on_behalf_of, file->name);
       else
-        OS (error, NILF, _("*** Deleting file '%s'"), file->name);
+        OS (error, NILF, _("*** deleting file '%s'"), file->name);
       if (unlink (file->name) < 0
           && errno != ENOENT)   /* It disappeared; so what.  */
         perror_with_name ("unlink: ", file->name);

@@ -1,5 +1,5 @@
 /* API for GNU Make dynamic objects.
-Copyright (C) 2013-2023 Free Software Foundation, Inc.
+Copyright (C) 2013-2024 Free Software Foundation, Inc.
 This file is part of GNU Make.
 
 GNU Make is free software; you can redistribute it and/or modify it under the
@@ -70,7 +70,7 @@ gmk_eval (const char *buffer, const gmk_floc *gfloc)
 char *
 gmk_expand (const char *ref)
 {
-  return allocated_variable_expand (ref);
+  return allocated_expand_string (ref);
 }
 
 /* Register a function to be called from makefiles.  */

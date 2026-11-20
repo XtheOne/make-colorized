@@ -71,7 +71,7 @@ USA.  */
 # endif
 #endif
 
-#if !defined _AMIGA && !defined VMS && !defined WINDOWS32
+#if !defined _AMIGA && !MK_OS_VMS && !MK_OS_W32
 # include <pwd.h>
 #endif
 
@@ -115,7 +115,7 @@ extern int errno;
 #endif
 
 
-#if (defined POSIX || defined WINDOWS32) && !defined __GNU_LIBRARY__
+#if (defined POSIX || MK_OS_W32) && !defined __GNU_LIBRARY__
 /* Posix does not require that the d_ino field be present, and some
    systems do not provide it. */
 # define REAL_DIR_ENTRY(dp) 1
@@ -146,11 +146,11 @@ extern int errno;
 #   include <alloca.h>
 #  else	/* Not HAVE_ALLOCA_H.  */
 #   ifndef _AIX
-#    ifdef WINDOWS32
+#    if MK_OS_W32
 #     include <malloc.h>
 #    else
 extern char *alloca ();
-#    endif /* WINDOWS32 */
+#    endif /* MK_OS_W32 */
 #   endif /* Not _AIX.  */
 #  endif /* sparc or HAVE_ALLOCA_H.  */
 # endif	/* GCC.  */
@@ -416,14 +416,14 @@ glob (const char *pattern, int flags,
 
   /* Find the filename.  */
   filename = strrchr (pattern, '/');
-#if defined __MSDOS__ || defined WINDOWS32
+#if MK_OS_DOS || MK_OS_W32
   /* The case of "d:pattern".  Since `:' is not allowed in
      file names, we can safely assume that wherever it
      happens in pattern, it signals the filename part.  This
      is so we could some day support patterns like "[a-z]:foo".  */
   if (filename == NULL)
     filename = strchr (pattern, ':');
-#endif /* __MSDOS__ || WINDOWS32 */
+#endif /* MK_OS_DOS || MK_OS_W32 */
   if (filename == NULL)
     {
       /* This can mean two things: a simple name or "~name".  The later
@@ -460,7 +460,7 @@ glob (const char *pattern, int flags,
     {
       char *newp;
       dirlen = filename - pattern;
-#if defined __MSDOS__ || defined WINDOWS32
+#if MK_OS_DOS || MK_OS_W32
       if (*filename == ':'
 	  || (filename > pattern + 1 && filename[-1] == ':'))
 	{
@@ -494,7 +494,7 @@ glob (const char *pattern, int flags,
       ++filename;
 
       if (filename[0] == '\0'
-#if defined __MSDOS__ || defined WINDOWS32
+#if MK_OS_DOS || MK_OS_W32
           && dirname[dirlen - 1] != ':'
 	  && (dirlen < 3 || dirname[dirlen - 2] != ':'
 	      || dirname[dirlen - 1] != '/')
@@ -518,13 +518,13 @@ glob (const char *pattern, int flags,
 
   oldcount = pglob->gl_pathc;
 
-#ifndef VMS
+#if !MK_OS_VMS
   if ((flags & (GLOB_TILDE|GLOB_TILDE_CHECK)) && dirname[0] == '~')
     {
       if (dirname[1] == '\0' || dirname[1] == '/')
 	{
 	  /* Look up home directory.  */
-#ifdef VMS
+#if MK_OS_VMS
 /* This isn't obvious, RTLs of DECC and VAXC know about "HOME" */
           const char *home_dir = getenv ("SYS$LOGIN");
 #else
@@ -534,11 +534,11 @@ glob (const char *pattern, int flags,
 	  if (home_dir == NULL || home_dir[0] == '\0')
 	    home_dir = "SYS:";
 # else
-#  ifdef WINDOWS32
+#  if MK_OS_W32
 	  if (home_dir == NULL || home_dir[0] == '\0')
             home_dir = "c:/users/default"; /* poor default */
 #  else
-#   ifdef VMS
+#   if MK_OS_VMS
 /* Again, this isn't obvious, if "HOME" isn't known "SYS$LOGIN" should be set */
 	  if (home_dir == NULL || home_dir[0] == '\0')
 	    home_dir = "SYS$DISK:[]";
@@ -601,8 +601,8 @@ glob (const char *pattern, int flags,
 	      else
 		home_dir = "~"; /* No luck.  */
 	    }
-#   endif /* VMS */
-#  endif /* WINDOWS32 */
+#   endif /* MK_OS_VMS */
+#  endif /* MK_OS_W32 */
 # endif
 	  /* Now construct the full directory.  */
 	  if (dirname[1] == '\0')
@@ -622,7 +622,7 @@ glob (const char *pattern, int flags,
 	      dirname = newp;
 	    }
 	}
-# if !defined _AMIGA && !defined WINDOWS32 && !defined VMS
+# if !defined _AMIGA && !MK_OS_W32 && !MK_OS_VMS
       else
 	{
 	  char *end_name = strchr (dirname, '/');
@@ -702,9 +702,9 @@ glob (const char *pattern, int flags,
 		 home directory.  */
 	      return GLOB_NOMATCH;
 	}
-# endif	/* Not Amiga && not WINDOWS32 && not VMS.  */
+# endif	/* Not Amiga && not MK_OS_W32 && not MK_OS_VMS.  */
     }
-#endif	/* Not VMS.  */
+#endif	/* Not MK_OS_VMS.  */
 
   /* Now test whether we looked for "~" or "~NAME".  In this case we
      can give the answer now.  */
@@ -1011,7 +1011,7 @@ prefix_array (const char *dirname, char **array, size_t n)
 {
   size_t i;
   size_t dirlen = strlen (dirname);
-#if defined __MSDOS__ || defined WINDOWS32
+#if MK_OS_DOS || MK_OS_W32
   char sep_char = '/';
 # define DIRSEP_CHAR sep_char
 #else
@@ -1022,7 +1022,7 @@ prefix_array (const char *dirname, char **array, size_t n)
     /* DIRNAME is just "/", so normal prepending would get us "//foo".
        We want "/foo" instead, so don't prepend any chars from DIRNAME.  */
     dirlen = 0;
-#if defined __MSDOS__ || defined WINDOWS32
+#if MK_OS_DOS || MK_OS_W32
   else if (dirlen > 1)
     {
       if (dirname[dirlen - 1] == '/' && dirname[dirlen - 2] == ':')
@@ -1124,7 +1124,7 @@ glob_in_dir (const char *pattern, const char *directory, int flags,
   int meta;
   int save;
 
-#ifdef VMS
+#if MK_OS_VMS
   if (*directory == 0)
     directory = "[]";
 #endif

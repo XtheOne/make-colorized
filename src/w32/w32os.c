@@ -1,5 +1,5 @@
 /* Windows32-based operating system interface for GNU Make.
-Copyright (C) 2016-2023 Free Software Foundation, Inc.
+Copyright (C) 2016-2024 Free Software Foundation, Inc.
 This file is part of GNU Make.
 
 GNU Make is free software; you can redistribute it and/or modify it under the
@@ -35,6 +35,7 @@ unsigned int
 check_io_state ()
 {
   static unsigned int state = IO_UNKNOWN;
+  HANDLE outfd, errfd;
 
   /* We only need to compute this once per process.  */
   if (state != IO_UNKNOWN)
@@ -42,8 +43,8 @@ check_io_state ()
 
   /* Could have used GetHandleInformation, but that isn't supported
      on Windows 9X.  */
-  HANDLE outfd = (HANDLE)_get_osfhandle (fileno (stdout));
-  HANDLE errfd = (HANDLE)_get_osfhandle (fileno (stderr));
+  outfd = get_handle_for_fd (fileno (stdout));
+  errfd = get_handle_for_fd (fileno (stderr));
 
   /* Enable processing of ANSI color control sequences.  */
   DWORD dwMode = 0;
@@ -54,7 +55,7 @@ check_io_state ()
   dwMode |= ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
   SetConsoleMode(errfd, dwMode);
 
-  if ((HANDLE)_get_osfhandle (fileno (stdin)) != INVALID_HANDLE_VALUE)
+  if (get_handle_for_fd (fileno (stdin)) != INVALID_HANDLE_VALUE)
     state |= IO_STDIN_OK;
   if (outfd != INVALID_HANDLE_VALUE)
     state |= IO_STDOUT_OK;
@@ -137,7 +138,7 @@ os_anontmp ()
   static unsigned uniq = 0;
   static int second_loop = 0;
 
-  const char base[] = "gmake_tmpf";
+  const char base[] = "GmTMPF";
   const unsigned sizemax = sizeof (base) - 1 + 4 + 10 + 10;
   unsigned pid = GetCurrentProcessId ();
 
@@ -246,7 +247,7 @@ jobserver_setup (int slots, const char *style)
       DWORD err = GetLastError ();
       const char *estr = map_windows32_error_to_string (err);
       ONS (fatal, NILF,
-           _("creating jobserver semaphore: (Error %ld: %s)"), err, estr);
+           _("creating jobserver semaphore: (Error %lu: %s)"), err, estr);
     }
 
   return 1;
@@ -265,7 +266,7 @@ jobserver_parse_auth (const char *auth)
       DWORD err = GetLastError ();
       const char *estr = map_windows32_error_to_string (err);
       error (NILF, strlen (auth) + INTSTR_LENGTH + strlen (estr),
-             _("unable to open jobserver semaphore '%s': (Error %ld: %s)"),
+             _("unable to open jobserver semaphore '%s': (Error %lu: %s)"),
              auth, err, estr);
       return 0;
     }
@@ -318,7 +319,7 @@ jobserver_release (int is_fatal)
           DWORD err = GetLastError ();
           const char *estr = map_windows32_error_to_string (err);
           ONS (fatal, NILF,
-               _("release jobserver semaphore: (Error %ld: %s)"), err, estr);
+               _("release jobserver semaphore: (Error %lu: %s)"), err, estr);
         }
       perror_with_name ("release_jobserver_semaphore", "");
     }
@@ -346,11 +347,11 @@ jobserver_signal ()
 {
 }
 
-void jobserver_pre_child (int recursive)
+void jobserver_pre_child (int recursive UNUSED)
 {
 }
 
-void jobserver_post_child (int recursive)
+void jobserver_post_child (int recursive UNUSED)
 {
 }
 
@@ -362,7 +363,7 @@ jobserver_pre_acquire ()
 /* Returns 1 if we got a token, or 0 if a child has completed.
    The Windows implementation doesn't support load detection.  */
 unsigned int
-jobserver_acquire (int timeout)
+jobserver_acquire (int timeout UNUSED)
 {
     HANDLE *handles;
     DWORD dwHandleCount;
@@ -389,7 +390,7 @@ jobserver_acquire (int timeout)
         DWORD err = GetLastError ();
         const char *estr = map_windows32_error_to_string (err);
         ONS (fatal, NILF,
-             _("semaphore or child process wait: (Error %ld: %s)"),
+             _("semaphore or child process wait: (Error %lu: %s)"),
              err, estr);
       }
 
@@ -505,21 +506,36 @@ osync_release ()
 void
 fd_inherit(int fd)
 {
-  HANDLE fh = (HANDLE)_get_osfhandle(fd);
+  HANDLE fh = get_handle_for_fd (fd);
 
   if (fh && fh != INVALID_HANDLE_VALUE)
-        SetHandleInformation(fh, HANDLE_FLAG_INHERIT, 1);
+        SetHandleInformation (fh, HANDLE_FLAG_INHERIT, 1);
 }
 
 void
 fd_noinherit(int fd)
 {
-  HANDLE fh = (HANDLE)_get_osfhandle(fd);
+  HANDLE fh = get_handle_for_fd (fd);
 
   if (fh && fh != INVALID_HANDLE_VALUE)
-        SetHandleInformation(fh, HANDLE_FLAG_INHERIT, 0);
+        SetHandleInformation (fh, HANDLE_FLAG_INHERIT, 0);
+}
+
+int
+fd_set_append (int fd UNUSED)
+{
+  return -1;
 }
 
 void
-fd_set_append (int fd)
+fd_reset_append (int fd UNUSED, int flags UNUSED)
 {}
+
+HANDLE
+get_handle_for_fd (int fd)
+{
+  /* This funcion call is needed to get around the "bad-function-cast"-warning
+     emitted by GCC when casting and assigning in the same statement.  */
+  intptr_t fh = _get_osfhandle (fd);
+  return (HANDLE) fh;
+}

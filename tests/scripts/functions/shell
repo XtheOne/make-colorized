@@ -183,7 +183,7 @@ else
 default:;: $(ELT)
 endif
 !,
-                      '--no-print-directory -j2 --jobserver-style=pipe', "#MAKE#[2]: warning: jobserver unavailable: using -j1.  Add '+' to parent make rule.\n: 2\n: 1");
+                      '--no-print-directory -j2 --jobserver-style=pipe', "#MAKE#[2]: warning: jobserver unavailable: using -j1 (add '+' to parent make rule)\n: 2\n: 1");
     }
 
     # This crashes if we use vfork and don't reset environ properly
@@ -211,6 +211,20 @@ default:;: $(ELT)
 endif
 !,
                   '--no-print-directory -j2', ": 2\n: 1");
+}
+
+# sv 65323. Check for bash, because such long variable name causes ksh to
+# segfault.
+if (-x '/bin/bash') {
+    # sv 65172.
+    # Buffer overrun in recursively_expand_for_file on a variable with a long
+    # name.
+    my $v = "a1234567890" x 4 x 1000;
+    run_make_test("
+SHELL:=/bin/bash
+export $v=\$(shell echo hello)
+all:; \@echo \$\$$v
+", '', "hello\n");
 }
 
 1;

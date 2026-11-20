@@ -34,7 +34,10 @@ MAKE_CFLAGS := -C -Wall -Wextra -Werror -Wwrite-strings -Wshadow \
 	-Wtype-limits -Wunused-but-set-parameter -Wlogical-op -Wpointer-arith \
 	-Wignored-qualifiers -Wformat-signedness -Wduplicated-cond
 
-AM_CFLAGS += $(MAKE_CFLAGS)
+# Allow extra options without overriding MAKE_CFLAGS
+EXTRA_CFLAGS :=
+
+AM_CFLAGS += $(MAKE_CFLAGS) $(EXTRA_CFLAGS)
 
 # Unfortunately the Guile headers are sometimes broken.  Convince GCC
 # to treat them as system headers so warnings are ignored.
@@ -67,7 +70,6 @@ Basic.mk: Basic.mk.template .dep_segment Makefile
 	sed -e 's@%make_SOURCES%@$(call cvt,src,$(make_SRCS))@g' \
 	    -e 's@%w32_SOURCES%@$(call cvt,src,$(w32_SRCS))@g' \
 	    -e 's@%vms_SOURCES%@$(call cvt,src,$(vms_SRCS))@g' \
-	    -e 's@%amiga_SOURCES%@$(call cvt,src,$(amiga_SRCS))@g' \
 	    -e 's@%loadavg_SOURCES%@$(call cvt,lib,$(loadavg_SRCS))@g' \
 	    -e 's@%alloca_SOURCES%@$(call cvt,lib,$(alloca_SRCS))@g' \
 	    -e 's@%glob_SOURCES%@$(call cvt,lib,$(glob_SRCS))@g' \
@@ -517,7 +519,7 @@ $(UPLOADS): upload-%: $(DIST_ARCHIVES)
 # Rebuild Makefile.in if this file is modified.
 Makefile.in: maintMakefile
 
-# Copyright (C) 1997-2023 Free Software Foundation, Inc.
+# Copyright (C) 1997-2024 Free Software Foundation, Inc.
 # This file is part of GNU Make.
 #
 # GNU Make is free software; you can redistribute it and/or modify it under

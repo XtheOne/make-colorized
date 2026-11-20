@@ -1,5 +1,5 @@
 /* Output to stdout / stderr for GNU Make
-Copyright (C) 2013-2023 Free Software Foundation, Inc.
+Copyright (C) 2013-2024 Free Software Foundation, Inc.
 This file is part of GNU Make.
 
 GNU Make is free software; you can redistribute it and/or modify it under the
@@ -34,11 +34,11 @@ this program.  If not, see <https://www.gnu.org/licenses/>.  */
 # include <sys/file.h>
 #endif
 
-#ifdef WINDOWS32
+#if MK_OS_W32
 # include <windows.h>
 # include <io.h>
 # include "sub_proc.h"
-#endif /* WINDOWS32 */
+#endif
 
 struct output *output_context = NULL;
 unsigned int stdio_traced = 0;
@@ -154,7 +154,7 @@ pump_from_tmp (int from, FILE *to)
   long pos;
   char* buffer;
 
-#ifdef WINDOWS32
+#if MK_OS_W32
   int prev_mode;
 
   /* "from" is opened by open_tmpfd, which does it in binary mode, so
@@ -203,7 +203,7 @@ pump_from_tmp (int from, FILE *to)
 
   free(buffer);
 
-#ifdef WINDOWS32
+#if MK_OS_W32
   /* Switch "to" back to its original mode, so that log messages by
      Make have the same EOL format as without --output-sync.  */
   _setmode (fileno (to), prev_mode);
@@ -274,7 +274,7 @@ setup_tmpfile (struct output *out)
   /* If we failed to create a temp file, disable output sync going forward.  */
  error:
   O (error, NILF,
-     _("cannot open output-sync lock file, suppressing output-sync."));
+     _("cannot open output-sync lock file: suppressing output-sync"));
 
   output_close (out);
   output_sync = OUTPUT_SYNC_NONE;
@@ -305,7 +305,7 @@ output_dump (struct output *out)
       if (!osync_acquire ())
         {
           O (error, NILF,
-             _("warning: Cannot acquire output lock, disabling output sync."));
+             _("warning: cannot acquire output lock: disabling output sync"));
           osync_clear ();
         }
 
@@ -343,6 +343,9 @@ output_dump (struct output *out)
 #endif /* NO_OUTPUT_SYNC */
 
 
+static int stdout_flags = -1;
+static int stderr_flags = -1;
+
 void
 output_init (struct output *out)
 {
@@ -355,8 +358,8 @@ output_init (struct output *out)
 
   /* Force stdout/stderr into append mode (if they are files) to ensure
      parallel jobs won't lose output due to overlapping writes.  */
-  fd_set_append (fileno (stdout));
-  fd_set_append (fileno (stderr));
+  stdout_flags = fd_set_append (fileno (stdout));
+  stderr_flags = fd_set_append (fileno (stderr));
 }
 
 void
@@ -366,6 +369,8 @@ output_close (struct output *out)
     {
       if (stdio_traced)
         log_working_directory (0);
+      fd_reset_append(fileno (stdout), stdout_flags);
+      fd_reset_append(fileno (stderr), stderr_flags);
       return;
     }
 
@@ -466,7 +471,7 @@ message (int prefix, size_t len, const char *fmt, ...)
 /* Print a warning message.  */
 
 void
-warning (const floc *flocp, size_t len, const char *fmt, ...)
+warning_msg (const floc *flocp, size_t len, const char *fmt, ...)
 {
   va_list args;
   char *p;
@@ -531,8 +536,8 @@ error (const floc *flocp, size_t len, const char *fmt, ...)
 void
 fatal (const floc *flocp, size_t len, const char *fmt, ...)
 {
-  va_list args;
   const char *stop = _(".  Stop.\33[0m\n");
+  va_list args;
   char *start;
   char *p;
 
@@ -559,6 +564,29 @@ fatal (const floc *flocp, size_t len, const char *fmt, ...)
   outputs (1, start);
 
   die (MAKE_FAILURE);
+}
+
+/* Format a message and return a pointer to an internal buffer.  */
+
+char *
+format (const char *prefix, size_t len, const char *fmt, ...)
+{
+  va_list args;
+  size_t plen = prefix ? strlen (prefix) : 0;
+  char *start;
+  char *p;
+
+  len += strlen (fmt) + plen + 1;
+  start = p = get_buffer (len);
+
+  if (plen)
+    p = mempcpy (p, prefix, plen);
+
+  va_start (args, fmt);
+  vsprintf (p, fmt, args);
+  va_end (args);
+
+  return start;
 }
 
 /* Print an error message from errno.  */
