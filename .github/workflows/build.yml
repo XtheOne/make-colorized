@@ -70,7 +70,9 @@ jobs:
       - name: Test suite
         run: |
           if [ "$RUNNER_OS" = macOS ]; then
-            tests=$(cd tests/scripts && git ls-files | grep -v '^features/archives$' | tr '\n' ' ')
+            # Tests live in category folders; top-level files like
+            # test_template are not tests.
+            tests=$(cd tests/scripts && git ls-files | grep / | grep -v '^features/archives$' | tr '\n' ' ')
             $GMAKE check "MAKE_CFLAGS=$CLANG_CFLAGS" MAKETESTFLAGS="$tests"
           else
             $GMAKE check
