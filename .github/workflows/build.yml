@@ -5,6 +5,8 @@ on:
     branches: [colorized]
   pull_request:
   workflow_dispatch:
+  release:
+    types: [published]
 
 jobs:
   posix:
@@ -103,3 +105,67 @@ jobs:
             tests/work/
             tests/*.log
           if-no-files-found: ignore
+
+  windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write   # attach the package to a published release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Register compiler problem matcher
+        shell: bash
+        run: echo "::add-matcher::.github/problem-matchers/compiler.json"
+
+      - name: Bootstrap
+        shell: cmd
+        run: |
+          set "PATH=%PATH%;C:\Program Files\Git\usr\bin"
+          call bootstrap.bat
+
+      # bootstrap.bat downloads these from savannah.gnu.org, which does not
+      # always answer from CI; use the GitHub mirror at the pinned revision.
+      - name: Get gnulib files
+        shell: bash
+        run: |
+          rev=$(sed -n 's/^GNULIB_REVISION=//p' bootstrap.conf | tr -d '\r')
+          for f in getloadavg.c intprops.h intprops-internal.h; do
+            curl -fsSL -o "lib/$f" "https://raw.githubusercontent.com/coreutils/gnulib/$rev/lib/$f"
+          done
+
+      - name: Build
+        shell: cmd
+        run: call build_w32.bat
+
+      - name: Color and streaming smoke test
+        shell: bash
+        run: sh ./scripts/color-smoke-test.sh ./WinRel/gnumake.exe
+
+      - name: Package
+        shell: bash
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          ver=${TAG:-$(git rev-parse --short HEAD)}
+          name=make-colorized-$ver-windows-x64
+          mkdir "$name"
+          cp WinRel/gnumake.exe "$name/make.exe"
+          perl -pe 's/\r?\n/\r\n/' COPYING > "$name/COPYING.txt"
+          perl -pe 's/\r?\n/\r\n/' README.colorized > "$name/README.txt"
+          7z a -tzip "$name.zip" "$name" > /dev/null
+          echo "PACKAGE=$name.zip" >> "$GITHUB_ENV"
+          echo "PACKAGE_NAME=$name" >> "$GITHUB_ENV"
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PACKAGE_NAME }}
+          path: ${{ env.PACKAGE }}
+
+      - name: Attach package to the release
+        if: github.event_name == 'release'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" "$PACKAGE" --clobber
