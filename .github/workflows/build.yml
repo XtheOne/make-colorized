@@ -28,14 +28,15 @@ jobs:
           echo "GMAKE=make" >> "$GITHUB_ENV"
 
       # maintMakefile's MAKE_CFLAGS has GCC-only warnings that clang rejects
-      # under -Werror; keep the rest of the strict set.
+      # under -Werror; keep the rest of the strict set.  clang's
+      # -Wstring-compare fires on every streq() with a literal.
       - name: Install build tools (macOS)
         if: runner.os == 'macOS'
         run: |
           brew install autoconf automake gettext texinfo pkg-config make
           echo "$(brew --prefix texinfo)/bin" >> "$GITHUB_PATH"
           echo "GMAKE=gmake" >> "$GITHUB_ENV"
-          echo "CLANG_CFLAGS=-Wall -Wextra -Werror -Wwrite-strings -Wshadow -Wdeclaration-after-statement -Wbad-function-cast -Wformat-security -Wtype-limits -Wpointer-arith -Wignored-qualifiers" >> "$GITHUB_ENV"
+          echo "CLANG_CFLAGS=-Wall -Wextra -Werror -Wwrite-strings -Wshadow -Wdeclaration-after-statement -Wbad-function-cast -Wformat-security -Wtype-limits -Wpointer-arith -Wignored-qualifiers -Wno-string-compare" >> "$GITHUB_ENV"
 
       # savannah.gnu.org is not always reachable from CI; use the GitHub
       # mirror at the revision bootstrap.conf asks for.
