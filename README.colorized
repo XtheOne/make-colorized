@@ -1,0 +1,48 @@
+GNU Make, colorized
+===================
+
+This is GNU Make with colored errors and warnings, built from
+https://github.com/XtheOne/make-colorized.  It is not an official GNU
+release.  It is based on the development version of GNU Make (4.4.90).
+
+What is different from GNU Make
+-------------------------------
+
+* make's own errors are shown in red and its warnings in yellow.
+
+* In the output of recipes, the words "error" and "warning" are shown in
+  red and magenta, so compiler and linker problems stand out.
+
+* While colors are on, recipe output is passed through a pipe and shown
+  line by line while the recipe runs.  Each line is colored as it arrives.
+
+* The --color option controls this:
+
+    --color=auto     Colors only when the output goes to a terminal (the
+                     default).  The environment variable NO_COLOR, or
+                     TERM=dumb, turns colors off.
+    --color=always   Always color, also when the output goes to a file or a
+                     pipe, for example a CI log that shows ANSI colors.
+    --color, alone   The same as --color=always.
+    --color=never    No colors; the output is exactly that of GNU Make.
+
+  The option can also be set for every run with the MAKEFLAGS environment
+  variable, for example MAKEFLAGS=--color=always.
+
+Windows package
+---------------
+
+make.exe is a 64-bit build made with Microsoft Visual C++.  Copy it to a
+folder on your PATH.  Colors need Windows 10 or later; the Windows console
+and Windows Terminal show them.
+
+The executable is not code-signed, so Windows SmartScreen may warn the
+first time you run it.
+
+License and source
+------------------
+
+GNU Make is free software under the GNU General Public License version 3
+or later; see COPYING.  The complete source of this build is the matching
+tag of https://github.com/XtheOne/make-colorized; each GitHub release also
+has the source as a zip and a tar.gz archive.
