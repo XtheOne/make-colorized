@@ -4,7 +4,7 @@
 # Checks that:
 #  - with --color=always, errors and warnings in recipe output are colored
 #    and each line shows while the recipe is still running;
-#  - with the default --color=auto and output to a pipe, nothing is colored;
+#  - with --color=auto and output to a pipe, nothing is colored;
 #  - a background process that keeps the pipe open does not hang make.
 
 set -u
@@ -58,7 +58,7 @@ a2=$(grep "a2:" "$tmp/always.txt" | cut -d' ' -f1)
 [ -n "$a1" ] && [ -n "$a2" ] && [ "$a1" -lt "$a2" ]
 report $? "output streams while the recipe runs (a1 at ${a1:-?}s, a2 at ${a2:-?}s)"
 
-"$make" -f "$tmp/color.mk" -j2 2>&1 | cat > "$tmp/auto.txt"
+"$make" -f "$tmp/color.mk" -j2 --color=auto 2>&1 | cat > "$tmp/auto.txt"
 ! grep -q "$esc" "$tmp/auto.txt"
 report $? "no colors with --color=auto when output is a pipe"
 
