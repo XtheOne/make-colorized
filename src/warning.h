@@ -76,7 +76,7 @@ void warn_set_vardata (const struct warning_data *data);
             char *_a = xstrdup (_m);                        \
             if (warn_error (_t))                            \
               fatal (_f, strlen (_a), "%s", _a);            \
-            error (_f, strlen (_a), _("warning: %s"), _a);  \
+            warning_msg (_f, strlen (_a), _("warning: %s"), _a); \
             free (_a);                                      \
           }                                                 \
     }while(0)

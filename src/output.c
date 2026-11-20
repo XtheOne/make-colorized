@@ -46,6 +46,11 @@ unsigned int stdio_traced = 0;
 
 #define OUTPUT_NONE (-1)
 
+/* ANSI color sequences for make's own messages.  */
+#define COLOR_ERROR   "\33[91m"
+#define COLOR_WARNING "\33[93m"
+#define COLOR_RESET   "\33[0m"
+
 #define OUTPUT_ISSET(_out) ((_out)->out >= 0 || (_out)->err >= 0)
 
 /* Write a string to the current STDOUT or STDERR.  */
@@ -705,22 +710,23 @@ warning_msg (const floc *flocp, size_t len, const char *fmt, ...)
 
   len += (strlen (fmt) + strlen (program)
           + (flocp && flocp->filenm ? strlen (flocp->filenm) : 0)
-          + INTSTR_LENGTH + 4 + 1 + 1 + 6);
+          + INTSTR_LENGTH + 4 + 1 + 1
+          + CSTRLEN (COLOR_WARNING) + CSTRLEN (COLOR_RESET));
   p = get_buffer (len);
 
   if (flocp && flocp->filenm)
-    sprintf (p, "\33[93m%s:%lu: ", flocp->filenm, flocp->lineno + flocp->offset);
+    sprintf (p, COLOR_WARNING "%s:%lu: ", flocp->filenm, flocp->lineno + flocp->offset);
   else if (makelevel == 0)
-    sprintf (p, "\33[93m%s: ", program);
+    sprintf (p, COLOR_WARNING "%s: ", program);
   else
-    sprintf (p, "\33[93m%s[%u]: ", program, makelevel);
+    sprintf (p, COLOR_WARNING "%s[%u]: ", program, makelevel);
   p += strlen (p);
 
   va_start (args, fmt);
   vsprintf (p, fmt, args);
   va_end (args);
 
-  strcat (p, "\33[0m\n");
+  strcat (p, COLOR_RESET "\n");
 
   assert (fmtbuf.buffer[len-1] == '\0');
   outputs (1, fmtbuf.buffer);
@@ -737,22 +743,23 @@ error (const floc *flocp, size_t len, const char *fmt, ...)
 
   len += (strlen (fmt) + strlen (program)
           + (flocp && flocp->filenm ? strlen (flocp->filenm) : 0)
-          + INTSTR_LENGTH + 4 + 1 + 1 + 6);
+          + INTSTR_LENGTH + 4 + 1 + 1
+          + CSTRLEN (COLOR_ERROR) + CSTRLEN (COLOR_RESET));
   start = p = get_buffer (len);
 
   if (flocp && flocp->filenm)
-    sprintf (p, "\33[91m%s:%lu: ", flocp->filenm, flocp->lineno + flocp->offset);
+    sprintf (p, COLOR_ERROR "%s:%lu: ", flocp->filenm, flocp->lineno + flocp->offset);
   else if (makelevel == 0)
-    sprintf (p, "\33[91m%s: ", program);
+    sprintf (p, COLOR_ERROR "%s: ", program);
   else
-    sprintf (p, "\33[91m%s[%u]: ", program, makelevel);
+    sprintf (p, COLOR_ERROR "%s[%u]: ", program, makelevel);
   p += strlen (p);
 
   va_start (args, fmt);
   vsprintf (p, fmt, args);
   va_end (args);
 
-  strcat (p, "\33[0m\n");
+  strcat (p, COLOR_RESET "\n");
 
   assert (start[len-1] == '\0');
   outputs (1, start);
@@ -770,15 +777,15 @@ fatal (const floc *flocp, size_t len, const char *fmt, ...)
 
   len += (strlen (fmt) + strlen (program)
           + (flocp && flocp->filenm ? strlen (flocp->filenm) : 0)
-          + INTSTR_LENGTH + 8 + strlen (stop) + 1 + 6);
+          + INTSTR_LENGTH + 8 + strlen (stop) + 1 + CSTRLEN (COLOR_ERROR));
   start = p = get_buffer (len);
 
   if (flocp && flocp->filenm)
-    sprintf (p, "\33[91m%s:%lu: *** ", flocp->filenm, flocp->lineno + flocp->offset);
+    sprintf (p, COLOR_ERROR "%s:%lu: *** ", flocp->filenm, flocp->lineno + flocp->offset);
   else if (makelevel == 0)
-    sprintf (p, "\33[91m%s: *** ", program);
+    sprintf (p, COLOR_ERROR "%s: *** ", program);
   else
-    sprintf (p, "\33[91m%s[%u]: *** ", program, makelevel);
+    sprintf (p, COLOR_ERROR "%s[%u]: *** ", program, makelevel);
   p += strlen (p);
 
   va_start (args, fmt);
@@ -822,7 +829,7 @@ void
 perror_with_name (const char *str, const char *name)
 {
   const char *err = strerror (errno);
-  OSSS (error, NILF, _("\33[91m%s%s: %s\33[0m"), str, name, err);
+  OSSS (error, NILF, _("%s%s: %s"), str, name, err);
 }
 
 /* Print an error message from errno and exit.  */
@@ -831,7 +838,7 @@ void
 pfatal_with_name (const char *name)
 {
   const char *err = strerror (errno);
-  OSS (fatal, NILF, _("\33[91m%s: %s\33[0m"), name, err);
+  OSS (fatal, NILF, _("%s: %s"), name, err);
 
   /* NOTREACHED */
 }
